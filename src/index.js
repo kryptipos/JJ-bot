@@ -447,6 +447,20 @@ function getBackgroundIdForTier(tierName) {
     return "common";
 }
 
+async function resolveBrandLogoUrl(interaction) {
+    if (interaction?.guild) {
+        const inGuildIcon = interaction.guild.iconURL({ extension: "png", size: 512 });
+        if (inGuildIcon) return inGuildIcon;
+    }
+
+    const fallbackGuildId = process.env.GUILD_ID;
+    if (!fallbackGuildId) return null;
+
+    const guild = await client.guilds.fetch(fallbackGuildId).catch(() => null);
+    if (!guild) return null;
+    return guild.iconURL({ extension: "png", size: 512 }) || null;
+}
+
 async function renderMemberCardImage(user, balanceGold, totalBoughtGold, tierName, bgId, brandLogoUrl) {
     const width = 1000;
     const height = 560;
@@ -514,6 +528,7 @@ async function renderMemberCardImage(user, balanceGold, totalBoughtGold, tierNam
 
     // left panel: logo + tier
     ctx.textAlign = "center";
+    let hasBrandLogo = false;
     if (brandLogoUrl) {
         try {
             const logo = await loadImage(brandLogoUrl);
@@ -521,15 +536,18 @@ async function renderMemberCardImage(user, balanceGold, totalBoughtGold, tierNam
             const logoX = leftX + Math.floor((leftW - logoSize) / 2);
             const logoY = leftY + 64;
             ctx.drawImage(logo, logoX, logoY, logoSize, logoSize);
-        } catch {
-            ctx.fillStyle = "#ffffff";
-            ctx.font = "italic 120px 'Brush Script MT', 'Segoe Script', Georgia";
-            ctx.fillText("JJ", leftX + leftW / 2, leftY + 186);
+            hasBrandLogo = true;
+        } catch (err) {
+            console.error("Failed to render brand logo:", err?.message || err);
         }
-    } else {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "italic 120px 'Brush Script MT', 'Segoe Script', Georgia";
-        ctx.fillText("JJ", leftX + leftW / 2, leftY + 186);
+    }
+    if (!hasBrandLogo) {
+        const logoSize = 170;
+        const logoX = leftX + Math.floor((leftW - logoSize) / 2);
+        const logoY = leftY + 64;
+        ctx.strokeStyle = bg.accent;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(logoX, logoY, logoSize, logoSize);
     }
     ctx.fillStyle = bg.accent;
     ctx.font = "bold 42px 'JJDejaVu'";
@@ -1082,7 +1100,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     console.error("Failed to sync tier role after /mc:", roleErr);
                 }
 
-                const guildLogoUrl = interaction.guild?.iconURL({ extension: "png", size: 256 }) || null;
+                const guildLogoUrl = await resolveBrandLogoUrl(interaction);
                 const cardMessage = await buildMemberCardMessage(user, balance, updatedAt, totalBoughtGold, tierName, guildLogoUrl);
                 try {
                     const dmCardMessage = await buildMemberCardMessage(user, balance, updatedAt, totalBoughtGold, tierName, guildLogoUrl);
@@ -1248,7 +1266,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 } else {
                     tierName = getTierForTotalBought(totalBoughtGold).name;
                 }
-                const guildLogoUrl = interaction.inGuild() ? interaction.guild?.iconURL({ extension: "png", size: 256 }) : null;
+                const guildLogoUrl = await resolveBrandLogoUrl(interaction);
                 const cardMessage = await buildMemberCardMessage(interaction.user, row.balance_gold, row.updated_at, totalBoughtGold, tierName, guildLogoUrl);
                 return interaction.editReply({ files: cardMessage.files, components: [tipButtonRow()] });
             }

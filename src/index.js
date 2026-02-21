@@ -16,117 +16,202 @@ const {
     PermissionsBitField,
 } = require("discord.js");
 
-const Database = require("better-sqlite3");
+const { Pool } = require("pg");
 const { createCanvas, loadImage } = require("canvas");
 
-const DB_PATH = process.env.DB_PATH || "balances.db";
+const DATABASE_URL = process.env.DATABASE_URL;
 
-// ================= DATABASE =================
-const db = new Database(DB_PATH);
+if (!DATABASE_URL) {
+    throw new Error("DATABASE_URL is required. Add Railway Postgres DATABASE_URL to service variables.");
+}
 
-db.exec(`
+const db = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DATABASE_URL.includes("localhost") || DATABASE_URL.includes("127.0.0.1")
+        ? false
+        : { rejectUnauthorized: false },
+});
+
+function toInt(value) {
+    if (value === null || value === undefined) return 0;
+    const n = Number.parseInt(String(value), 10);
+    return Number.isFinite(n) ? n : 0;
+}
+
+async function initDatabase() {
+    await db.query(`
 CREATE TABLE IF NOT EXISTS settings (
   guild_id TEXT PRIMARY KEY,
   order_channel_id TEXT NOT NULL,
   tickets_category_id TEXT NOT NULL,
   archive_category_id TEXT
 );
+`);
 
+    await db.query(`
 CREATE TABLE IF NOT EXISTS prices (
   guild_id TEXT PRIMARY KEY,
-  usd_per_1m REAL NOT NULL,
+  usd_per_1m DOUBLE PRECISION NOT NULL,
   updated_at TEXT NOT NULL
 );
+`);
 
+    await db.query(`
 CREATE TABLE IF NOT EXISTS members (
   discord_id TEXT PRIMARY KEY,
-  balance_gold INTEGER NOT NULL DEFAULT 0,
+  balance_gold BIGINT NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
+`);
 
+    await db.query(`
 CREATE TABLE IF NOT EXISTS purchases (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id BIGSERIAL PRIMARY KEY,
   discord_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   details TEXT NOT NULL,
-  gold_cost INTEGER NOT NULL,
-  balance_after INTEGER NOT NULL,
+  gold_cost BIGINT NOT NULL,
+  balance_after BIGINT NOT NULL,
   created_at TEXT NOT NULL
 );
+`);
 
+    await db.query(`
 CREATE TABLE IF NOT EXISTS card_background_ownership (
   discord_id TEXT NOT NULL,
   bg_id TEXT NOT NULL,
   owned_at TEXT NOT NULL,
   PRIMARY KEY(discord_id, bg_id)
 );
+`);
 
+    await db.query(`
 CREATE TABLE IF NOT EXISTS card_profiles (
   discord_id TEXT PRIMARY KEY,
   equipped_bg_id TEXT NOT NULL DEFAULT 'common',
   updated_at TEXT NOT NULL
 );
 `);
-
-const settingsColumns = db.prepare(`PRAGMA table_info(settings)`).all();
-if (!settingsColumns.some((c) => c.name === "archive_category_id")) {
-    db.exec(`ALTER TABLE settings ADD COLUMN archive_category_id TEXT`);
 }
 
-const getSettings = db.prepare(`SELECT * FROM settings WHERE guild_id = ?`);
-const upsertSettings = db.prepare(`
-INSERT INTO settings(guild_id, order_channel_id, tickets_category_id, archive_category_id)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(guild_id) DO UPDATE SET
-  order_channel_id = excluded.order_channel_id,
-  tickets_category_id = excluded.tickets_category_id,
-  archive_category_id = excluded.archive_category_id
-`);
+async function getSettings(guildId) {
+    const res = await db.query(`SELECT * FROM settings WHERE guild_id = $1`, [guildId]);
+    return res.rows[0] || null;
+}
 
-const getPrice = db.prepare(`SELECT usd_per_1m, updated_at FROM prices WHERE guild_id = ?`);
-const getLatestPrice = db.prepare(`SELECT guild_id, usd_per_1m, updated_at FROM prices ORDER BY updated_at DESC LIMIT 1`);
-const upsertPrice = db.prepare(`
-INSERT INTO prices(guild_id, usd_per_1m, updated_at)
-VALUES (?, ?, ?)
-ON CONFLICT(guild_id) DO UPDATE SET
-  usd_per_1m = excluded.usd_per_1m,
-  updated_at = excluded.updated_at
-`);
+async function upsertSettings(guildId, orderChannelId, ticketsCategoryId, archiveCategoryId) {
+    await db.query(
+        `INSERT INTO settings(guild_id, order_channel_id, tickets_category_id, archive_category_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT(guild_id) DO UPDATE SET
+           order_channel_id = EXCLUDED.order_channel_id,
+           tickets_category_id = EXCLUDED.tickets_category_id,
+           archive_category_id = EXCLUDED.archive_category_id`,
+        [guildId, orderChannelId, ticketsCategoryId, archiveCategoryId]
+    );
+}
 
-const getMember = db.prepare(`SELECT balance_gold, updated_at FROM members WHERE discord_id = ?`);
-const insertMember = db.prepare(`
-INSERT INTO members(discord_id, balance_gold, updated_at)
-VALUES (?, ?, ?)
-`);
-const updateMember = db.prepare(`
-UPDATE members SET balance_gold = ?, updated_at = ? WHERE discord_id = ?
-`);
-const deleteMember = db.prepare(`
-DELETE FROM members WHERE discord_id = ?
-`);
+async function getPrice(guildId) {
+    const res = await db.query(`SELECT usd_per_1m, updated_at FROM prices WHERE guild_id = $1`, [guildId]);
+    return res.rows[0] || null;
+}
 
-const insertPurchase = db.prepare(`
-INSERT INTO purchases(discord_id, kind, details, gold_cost, balance_after, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
-`);
-const getHistoryForUser = db.prepare(`
-SELECT kind, details, gold_cost, balance_after, created_at
-FROM purchases
-WHERE discord_id = ?
-ORDER BY id DESC
-LIMIT ?
-`);
-const deletePurchasesForUser = db.prepare(`
-DELETE FROM purchases WHERE discord_id = ?
-`);
-const getTotalBought = db.prepare(`
-SELECT COALESCE(SUM(gold_cost), 0) AS total_gold
-FROM purchases
-WHERE discord_id = ?
-`);
-const countMembers = db.prepare(`SELECT COUNT(*) AS c FROM members`);
-const countPurchases = db.prepare(`SELECT COUNT(*) AS c FROM purchases`);
-const countSettings = db.prepare(`SELECT COUNT(*) AS c FROM settings`);
+async function getLatestPrice() {
+    const res = await db.query(`SELECT guild_id, usd_per_1m, updated_at FROM prices ORDER BY updated_at DESC LIMIT 1`);
+    return res.rows[0] || null;
+}
+
+async function upsertPrice(guildId, usdPer1m, updatedAt) {
+    await db.query(
+        `INSERT INTO prices(guild_id, usd_per_1m, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT(guild_id) DO UPDATE SET
+           usd_per_1m = EXCLUDED.usd_per_1m,
+           updated_at = EXCLUDED.updated_at`,
+        [guildId, usdPer1m, updatedAt]
+    );
+}
+
+async function getMember(discordId) {
+    const res = await db.query(`SELECT balance_gold, updated_at FROM members WHERE discord_id = $1`, [discordId]);
+    if (!res.rows[0]) return null;
+    return {
+        balance_gold: toInt(res.rows[0].balance_gold),
+        updated_at: res.rows[0].updated_at,
+    };
+}
+
+async function insertMember(discordId, balanceGold, updatedAt) {
+    await db.query(
+        `INSERT INTO members(discord_id, balance_gold, updated_at) VALUES ($1, $2, $3)`,
+        [discordId, balanceGold, updatedAt]
+    );
+}
+
+async function updateMember(balanceGold, updatedAt, discordId) {
+    await db.query(
+        `UPDATE members SET balance_gold = $1, updated_at = $2 WHERE discord_id = $3`,
+        [balanceGold, updatedAt, discordId]
+    );
+}
+
+async function deleteMember(discordId) {
+    const res = await db.query(`DELETE FROM members WHERE discord_id = $1`, [discordId]);
+    return res.rowCount || 0;
+}
+
+async function insertPurchase(discordId, kind, details, goldCost, balanceAfter, createdAt) {
+    await db.query(
+        `INSERT INTO purchases(discord_id, kind, details, gold_cost, balance_after, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [discordId, kind, details, goldCost, balanceAfter, createdAt]
+    );
+}
+
+async function getHistoryForUser(discordId, limit = 10) {
+    const safeLimit = Math.max(1, Math.min(50, toInt(limit) || 10));
+    const res = await db.query(
+        `SELECT kind, details, gold_cost, balance_after, created_at
+         FROM purchases
+         WHERE discord_id = $1
+         ORDER BY id DESC
+         LIMIT $2`,
+        [discordId, safeLimit]
+    );
+    return res.rows.map((r) => ({
+        ...r,
+        gold_cost: toInt(r.gold_cost),
+        balance_after: toInt(r.balance_after),
+    }));
+}
+
+async function deletePurchasesForUser(discordId) {
+    const res = await db.query(`DELETE FROM purchases WHERE discord_id = $1`, [discordId]);
+    return res.rowCount || 0;
+}
+
+async function getTotalBought(discordId) {
+    const res = await db.query(
+        `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE discord_id = $1`,
+        [discordId]
+    );
+    return { total_gold: toInt(res.rows[0]?.total_gold) };
+}
+
+async function countMembers() {
+    const res = await db.query(`SELECT COUNT(*) AS c FROM members`);
+    return toInt(res.rows[0]?.c);
+}
+
+async function countPurchases() {
+    const res = await db.query(`SELECT COUNT(*) AS c FROM purchases`);
+    return toInt(res.rows[0]?.c);
+}
+
+async function countSettings() {
+    const res = await db.query(`SELECT COUNT(*) AS c FROM settings`);
+    return toInt(res.rows[0]?.c);
+}
 
 const BUYER_TIERS = [
     { name: "Common", minGold: 0, color: 0x95a5a6 },
@@ -701,7 +786,7 @@ function tipModal() {
 }
 
 async function createTicket(interaction, type) {
-    const settings = getSettings.get(interaction.guildId);
+    const settings = await getSettings(interaction.guildId);
     if (!settings) {
         await interaction.editReply({ content: "ERROR: Bot not setup yet. Admin must run `/setup`." });
         return;
@@ -759,7 +844,7 @@ async function createTicket(interaction, type) {
     });
 
     if (type === "gold") {
-        const p = getPrice.get(interaction.guildId);
+        const p = await getPrice(interaction.guildId);
         const priceText = p ? `Current rate: **${p.usd_per_1m} USD / 1M**` : "Current rate: **Not set**";
 
         await ticketChannel.send({
@@ -828,7 +913,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 // Save setup
-                upsertSettings.run(interaction.guildId, order.id, category.id, archiveCategory.id);
+                await upsertSettings(interaction.guildId, order.id, category.id, archiveCategory.id);
 
                 // Post the panel automatically
                 await order.send({
@@ -849,7 +934,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const price = interaction.options.getNumber("usd_per_1m", true);
                 if (price <= 0) return interaction.editReply({ content: "ERROR: Price must be > 0." });
 
-                upsertPrice.run(interaction.guildId, price, nowISO());
+                await upsertPrice(interaction.guildId, price, nowISO());
                 return interaction.editReply({ content: `OK: Price updated: ${price} USD / 1M` });
             }
 
@@ -857,15 +942,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
                 await interaction.deferReply({ ephemeral: true });
 
-                const guildPrice = getPrice.get(interaction.guildId) || null;
-                const latestPrice = getLatestPrice.get() || null;
-                const m = countMembers.get().c;
-                const p = countPurchases.get().c;
-                const s = countSettings.get().c;
+                const guildPrice = await getPrice(interaction.guildId);
+                const latestPrice = await getLatestPrice();
+                const m = await countMembers();
+                const p = await countPurchases();
+                const s = await countSettings();
 
                 return interaction.editReply({
                     content:
-                        `DB Path: \`${DB_PATH}\`\n` +
+                        `DB: Postgres (Railway)\n` +
                         `Guild: \`${interaction.guildId}\`\n` +
                         `Settings rows: **${s}**\n` +
                         `Members rows: **${m}**\n` +
@@ -880,7 +965,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 await interaction.deferReply({ ephemeral: true });
 
-                const settings = getSettings.get(interaction.guildId);
+                const settings = await getSettings(interaction.guildId);
                 if (!settings) return interaction.editReply({ content: "ERROR: Run `/setup` first." });
 
                 const orderCh = await client.channels.fetch(settings.order_channel_id).catch(() => null);
@@ -894,7 +979,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
                 await interaction.deferReply({ ephemeral: true });
 
-                const settings = getSettings.get(interaction.guildId);
+                const settings = await getSettings(interaction.guildId);
                 if (!settings) return interaction.editReply({ content: "ERROR: Run `/setup` first." });
                 if (!settings.archive_category_id) {
                     return interaction.editReply({ content: "ERROR: Archive category not configured. Re-run `/setup`." });
@@ -966,7 +1051,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const balance = interaction.options.getInteger("balance", true);
                 if (balance < 0) return interaction.editReply({ content: "ERROR: Balance cannot be negative." });
 
-                const existing = getMember.get(user.id);
+                const existing = await getMember(user.id);
                 if (existing) {
                     return interaction.editReply({
                         content: `WARNING: Member already exists with **${formatGold(existing.balance_gold)}**. Use **/addbal**.`,
@@ -974,9 +1059,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 const updatedAt = nowISO();
-                insertMember.run(user.id, balance, updatedAt);
+                await insertMember(user.id, balance, updatedAt);
 
-                const totalBoughtGold = getTotalBought.get(user.id).total_gold;
+                const totalBoughtGold = (await getTotalBought(user.id)).total_gold;
                 let tierName = getTierForTotalBought(totalBoughtGold).name;
                 try {
                     tierName = await syncBuyerTierRole(interaction.guild, user.id, totalBoughtGold);
@@ -1010,11 +1095,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const amount = interaction.options.getInteger("amount", true);
                 if (amount <= 0) return interaction.editReply({ content: "ERROR: Amount must be > 0." });
 
-                const existing = getMember.get(user.id);
+                const existing = await getMember(user.id);
                 if (!existing) return interaction.editReply({ content: `ERROR: No member record for ${user}. Use **/mc** first.` });
 
                 const newBalance = existing.balance_gold + amount;
-                updateMember.run(newBalance, nowISO(), user.id);
+                await updateMember(newBalance, nowISO(), user.id);
 
                 return interaction.editReply({
                     content: `OK: Added **${formatGold(amount)}** to ${user}. New balance: **${formatGold(newBalance)}**.`,
@@ -1025,7 +1110,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
 
                 const user = interaction.options.getUser("user", true);
-                const existing = getMember.get(user.id);
+                const existing = await getMember(user.id);
                 if (!existing) return interaction.reply({ content: `ERROR: No member record for ${user}. Use **/mc** first.`, ephemeral: true });
 
                 const token = `${interaction.user.id}:${user.id}:${Date.now()}`;
@@ -1058,13 +1143,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const goldCost = interaction.options.getInteger("gold_cost", true);
                 if (goldCost <= 0) return interaction.editReply({ content: "ERROR: gold_cost must be > 0." });
 
-                const member = getMember.get(user.id);
+                const member = await getMember(user.id);
                 if (!member) return interaction.editReply({ content: `ERROR: ${user} has no member card. Use /mc first.` });
 
                 const newBalance = member.balance_gold - goldCost;
-                updateMember.run(newBalance, nowISO(), user.id);
-                insertPurchase.run(user.id, kind, details, goldCost, newBalance, nowISO());
-                const totalBoughtGold = getTotalBought.get(user.id).total_gold;
+                await updateMember(newBalance, nowISO(), user.id);
+                await insertPurchase(user.id, kind, details, goldCost, newBalance, nowISO());
+                const totalBoughtGold = (await getTotalBought(user.id)).total_gold;
 
                 let tierName = getTierForTotalBought(totalBoughtGold).name;
                 try {
@@ -1104,7 +1189,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (commandName === "history") {
                 await interaction.deferReply({ ephemeral: true });
 
-                const rows = getHistoryForUser.all(interaction.user.id, 10);
+                const rows = await getHistoryForUser(interaction.user.id, 10);
                 if (!rows || rows.length === 0) return interaction.editReply({ content: "No purchases yet." });
 
                 const lines = rows.map((r, i) => {
@@ -1123,7 +1208,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 await interaction.deferReply({ ephemeral: true });
 
                 const user = interaction.options.getUser("user", true);
-                const rows = getHistoryForUser.all(user.id, 10);
+                const rows = await getHistoryForUser(user.id, 10);
                 if (!rows || rows.length === 0) return interaction.editReply({ content: `No purchases for ${user} yet.` });
 
                 const lines = rows.map((r, i) => {
@@ -1139,10 +1224,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (commandName === "me") {
                 await interaction.deferReply({ ephemeral: true });
 
-                const row = getMember.get(interaction.user.id);
+                const row = await getMember(interaction.user.id);
                 if (!row) return interaction.editReply({ content: "ERROR: You don't have a member record yet." });
 
-                const totalBoughtGold = getTotalBought.get(interaction.user.id).total_gold;
+                const totalBoughtGold = (await getTotalBought(interaction.user.id)).total_gold;
                 let tierName;
                 if (interaction.inGuild()) {
                     const guildMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
@@ -1167,7 +1252,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     return interaction.reply({ content: "ERROR: Tip amount must be a positive integer.", ephemeral: true });
                 }
 
-                const member = getMember.get(interaction.user.id);
+                const member = await getMember(interaction.user.id);
                 if (!member) {
                     return interaction.reply({ content: "ERROR: You don't have a member record yet.", ephemeral: true });
                 }
@@ -1182,8 +1267,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 const newBalance = member.balance_gold - amount;
-                updateMember.run(newBalance, nowISO(), interaction.user.id);
-                insertPurchase.run(
+                await updateMember(newBalance, nowISO(), interaction.user.id);
+                await insertPurchase(
                     interaction.user.id,
                     "tip",
                     note ? `Tip: ${note}` : "Tip",
@@ -1192,7 +1277,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     nowISO()
                 );
 
-                const totalBoughtGold = getTotalBought.get(interaction.user.id).total_gold;
+                const totalBoughtGold = (await getTotalBought(interaction.user.id)).total_gold;
                 let tierName = getTierForTotalBought(totalBoughtGold).name;
                 try {
                     const guild = interaction.inGuild()
@@ -1337,14 +1422,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     return interaction.update({ content: "OK: Reset canceled.", components: [] });
                 }
 
-                const member = getMember.get(payload.targetUserId);
+                const member = await getMember(payload.targetUserId);
                 if (!member) {
                     pendingBalanceResets.delete(token);
                     return interaction.update({ content: "ERROR: Member record no longer exists.", components: [] });
                 }
 
-                deleteMember.run(payload.targetUserId);
-                const deleted = deletePurchasesForUser.run(payload.targetUserId).changes;
+                await deleteMember(payload.targetUserId);
+                const deleted = await deletePurchasesForUser(payload.targetUserId);
                 pendingBalanceResets.delete(token);
                 try {
                     await clearBuyerTierRoles(interaction.guild, payload.targetUserId);
@@ -1364,7 +1449,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
 
             if (interaction.customId === "price_check") {
-                const p = getPrice.get(interaction.guildId);
+                const p = await getPrice(interaction.guildId);
                 if (!p) return interaction.reply({ content: "WARNING: Price not set yet. Admin run `/goldprice`.", ephemeral: true });
 
                 return interaction.reply({
@@ -1409,4 +1494,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+async function start() {
+    await initDatabase();
+    await client.login(process.env.DISCORD_TOKEN);
+}
+
+start().catch((err) => {
+    console.error("Fatal startup error:", err);
+    process.exit(1);
+});

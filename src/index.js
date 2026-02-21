@@ -17,7 +17,20 @@ const {
 } = require("discord.js");
 
 const { Pool } = require("pg");
-const { createCanvas, loadImage } = require("canvas");
+const { createCanvas, loadImage, registerFont } = require("canvas");
+
+try {
+    registerFont(require.resolve("dejavu-fonts-ttf/ttf/DejaVuSans.ttf"), {
+        family: "JJDejaVu",
+        weight: "normal",
+    });
+    registerFont(require.resolve("dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf"), {
+        family: "JJDejaVu",
+        weight: "bold",
+    });
+} catch (err) {
+    console.error("Font registration warning:", err?.message || err);
+}
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -519,10 +532,10 @@ async function renderMemberCardImage(user, balanceGold, totalBoughtGold, tierNam
         ctx.fillText("JJ", leftX + leftW / 2, leftY + 186);
     }
     ctx.fillStyle = bg.accent;
-    ctx.font = "bold 42px 'DejaVu Sans', sans-serif";
+    ctx.font = "bold 42px 'JJDejaVu'";
     ctx.fillText(`${tierName} Tier`, leftX + leftW / 2, leftY + 300);
     ctx.fillStyle = "rgba(255,255,255,0.90)";
-    ctx.font = "bold 38px 'DejaVu Sans', sans-serif";
+    ctx.font = "bold 38px 'JJDejaVu'";
     ctx.fillText(user.username, leftX + leftW / 2, leftY + 374);
 
     // right panel: avatar top, balances under
@@ -551,12 +564,12 @@ async function renderMemberCardImage(user, balanceGold, totalBoughtGold, tierNam
     const labelY2 = valueY1 + 56;
     const valueY2 = labelY2 + 52;
 
-    ctx.font = "bold 24px 'DejaVu Sans', sans-serif";
+    ctx.font = "bold 24px 'JJDejaVu'";
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fillText("Remaining Balance", statsX, labelY1);
     ctx.fillText("Total Spent Gold", statsX, labelY2);
 
-    ctx.font = "bold 46px 'DejaVu Sans', sans-serif";
+    ctx.font = "bold 46px 'JJDejaVu'";
     ctx.fillStyle = "#f1f1f1";
     ctx.fillText(formatGold(balanceGold), statsX, valueY1);
     ctx.fillText(formatGold(totalBoughtGold), statsX, valueY2);

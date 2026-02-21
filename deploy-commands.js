@@ -102,8 +102,15 @@ const commands = [
         .setDescription("View a user's last 10 purchases (admin)")
         .addUserOption(o => o.setName("user").setDescription("Buyer").setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+    new SlashCommandBuilder()
+        .setName("who")
+        .setDescription("View a user's member stats (admin)")
+        .addUserOption(o => o.setName("user").setDescription("Buyer").setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 ].map(c => c.toJSON());
 
+const guildCommands = commands.filter((c) => c.name !== "me");
 const dmCommands = commands.filter((c) => c.name === "me");
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -113,7 +120,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
         console.log("... Registering guild commands...");
         await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body: commands }
+            { body: guildCommands }
         );
         await rest.put(
             Routes.applicationCommands(process.env.CLIENT_ID),

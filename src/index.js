@@ -211,6 +211,26 @@ async function getTotalBought(discordId) {
     return { total_gold: toInt(res.rows[0]?.total_gold) };
 }
 
+async function getUserStats(discordId) {
+    const [member, total, purchaseStats] = await Promise.all([
+        getMember(discordId),
+        getTotalBought(discordId),
+        db.query(
+            `SELECT COUNT(*) AS purchase_count, MAX(created_at) AS last_purchase_at
+             FROM purchases
+             WHERE discord_id = $1`,
+            [discordId]
+        ),
+    ]);
+
+    return {
+        member,
+        totalBoughtGold: total.total_gold,
+        purchaseCount: toInt(purchaseStats.rows[0]?.purchase_count),
+        lastPurchaseAt: purchaseStats.rows[0]?.last_purchase_at || null,
+    };
+}
+
 async function countMembers() {
     const res = await db.query(`SELECT COUNT(*) AS c FROM members`);
     return toInt(res.rows[0]?.c);
@@ -1250,6 +1270,62 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 return interaction.editReply({
                     embeds: [new EmbedBuilder().setTitle(`Purchase History: ${user.username}`).setDescription(lines.join("\n\n"))],
                 });
+            }
+
+            if (commandName === "who") {
+                if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
+                await interaction.deferReply({ ephemeral: true });
+
+                const user = interaction.options.getUser("user", true);
+                const stats = await getUserStats(user.id);
+                if (!stats.member) {
+                    return interaction.editReply({ content: `No member record for ${user}.` });
+                }
+
+                const tier = getTierForTotalBought(stats.totalBoughtGold);
+                const progress = getNextTierProgress(stats.totalBoughtGold);
+                const lastPurchase = stats.lastPurchaseAt
+                    ? `\`${String(stats.lastPurchaseAt).replace("T", " ").slice(0, 19)}\``
+                    : "None";
+
+                const embed = new EmbedBuilder()
+                    .setColor(tier.color)
+                    .setTitle(`Member Stats: ${user.username}`)
+                    .setDescription(`${user}`)
+                    .addFields(
+                        {
+                            name: "Balance Remaining",
+                            value: `**${formatGold(stats.member.balance_gold)}** (${stats.member.balance_gold.toLocaleString()})`,
+                            inline: true,
+                        },
+                        {
+                            name: "Total Spent Gold",
+                            value: `**${formatGold(stats.totalBoughtGold)}** (${stats.totalBoughtGold.toLocaleString()})`,
+                            inline: true,
+                        },
+                        {
+                            name: "Tier",
+                            value: `**${tier.name} Tier**`,
+                            inline: true,
+                        },
+                        {
+                            name: "Purchases",
+                            value: `${stats.purchaseCount}`,
+                            inline: true,
+                        },
+                        {
+                            name: "Last Purchase",
+                            value: lastPurchase,
+                            inline: true,
+                        },
+                        {
+                            name: "Next Tier Progress",
+                            value: progress.spendText,
+                            inline: false,
+                        }
+                    );
+
+                return interaction.editReply({ embeds: [embed] });
             }
 
             if (commandName === "me") {

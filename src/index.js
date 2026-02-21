@@ -84,6 +84,7 @@ ON CONFLICT(guild_id) DO UPDATE SET
 `);
 
 const getPrice = db.prepare(`SELECT usd_per_1m, updated_at FROM prices WHERE guild_id = ?`);
+const getLatestPrice = db.prepare(`SELECT guild_id, usd_per_1m, updated_at FROM prices ORDER BY updated_at DESC LIMIT 1`);
 const upsertPrice = db.prepare(`
 INSERT INTO prices(guild_id, usd_per_1m, updated_at)
 VALUES (?, ?, ?)
@@ -123,6 +124,9 @@ SELECT COALESCE(SUM(gold_cost), 0) AS total_gold
 FROM purchases
 WHERE discord_id = ?
 `);
+const countMembers = db.prepare(`SELECT COUNT(*) AS c FROM members`);
+const countPurchases = db.prepare(`SELECT COUNT(*) AS c FROM purchases`);
+const countSettings = db.prepare(`SELECT COUNT(*) AS c FROM settings`);
 
 const BUYER_TIERS = [
     { name: "Common", minGold: 0, color: 0x95a5a6 },
@@ -847,6 +851,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 upsertPrice.run(interaction.guildId, price, nowISO());
                 return interaction.editReply({ content: `OK: Price updated: ${price} USD / 1M` });
+            }
+
+            if (commandName === "dbcheck") {
+                if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
+                await interaction.deferReply({ ephemeral: true });
+
+                const guildPrice = getPrice.get(interaction.guildId) || null;
+                const latestPrice = getLatestPrice.get() || null;
+                const m = countMembers.get().c;
+                const p = countPurchases.get().c;
+                const s = countSettings.get().c;
+
+                return interaction.editReply({
+                    content:
+                        `DB Path: \`${DB_PATH}\`\n` +
+                        `Guild: \`${interaction.guildId}\`\n` +
+                        `Settings rows: **${s}**\n` +
+                        `Members rows: **${m}**\n` +
+                        `Purchases rows: **${p}**\n` +
+                        `Current guild price: **${guildPrice ? guildPrice.usd_per_1m : "none"}**\n` +
+                        `Latest price row: **${latestPrice ? `${latestPrice.usd_per_1m} (guild ${latestPrice.guild_id})` : "none"}**`,
+                });
             }
 
             if (commandName === "postorder") {

@@ -36,6 +36,11 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     new SlashCommandBuilder()
+        .setName("dbcheck")
+        .setDescription("Show runtime DB status (admin)")
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+    new SlashCommandBuilder()
         .setName("postorder")
         .setDescription("Post the order embed + buttons in the saved order channel")
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),

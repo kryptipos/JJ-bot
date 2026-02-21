@@ -645,6 +645,7 @@ function buildTierProgressEmbed(totalGold, tierName, userLabel) {
         )
         .addFields(
             { name: "Current Tier", value: `**${tierName} Tier**`, inline: true },
+            { name: "Current Reward", value: TIER_REWARDS[tierName] || TIER_REWARDS.Common, inline: false },
             { name: "Next Tier", value: `**${progress.nextTierLabel}**`, inline: true },
             { name: "Next Reward", value: progress.nextReward, inline: false }
         );
@@ -1228,6 +1229,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             { name: "Balance After", value: `**${formatGold(newBalance)}** (${newBalance.toLocaleString()})`, inline: false },
                             { name: "Total Bought", value: `**${formatGold(totalBoughtGold)}** (${totalBoughtGold.toLocaleString()})`, inline: false },
                             { name: "Tier", value: `**${tierName} Tier**`, inline: true },
+                            { name: "Current Reward", value: TIER_REWARDS[tierName] || TIER_REWARDS.Common, inline: false },
                             { name: "Next Tier", value: `**${progress.nextTierLabel}**`, inline: true },
                             { name: "Next Reward", value: progress.nextReward, inline: false },
                             { name: "Progress", value: progress.spendText, inline: false },

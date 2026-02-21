@@ -19,8 +19,10 @@ const {
 const Database = require("better-sqlite3");
 const { createCanvas, loadImage } = require("canvas");
 
+const DB_PATH = process.env.DB_PATH || "balances.db";
+
 // ================= DATABASE =================
-const db = new Database("balances.db");
+const db = new Database(DB_PATH);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS settings (

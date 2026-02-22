@@ -879,6 +879,42 @@ function tipModal() {
     return modal;
 }
 
+async function notifyAdminsByDm(guild, requester, sourceChannelId) {
+    const targets = new Map();
+
+    // Owner is always a safe default admin target.
+    const ownerId = guild.ownerId;
+    if (ownerId) {
+        const owner = await guild.members.fetch(ownerId).catch(() => null);
+        if (owner?.user) targets.set(owner.id, owner.user);
+    }
+
+    // Add currently cached admin/manager members.
+    for (const member of guild.members.cache.values()) {
+        if (
+            member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+            member.permissions.has(PermissionsBitField.Flags.ManageGuild)
+        ) {
+            targets.set(member.id, member.user);
+        }
+    }
+
+    const dmText =
+        `Price update request from ${requester.tag} (${requester.id})\n` +
+        `Server: ${guild.name} (${guild.id})\n` +
+        `Channel: https://discord.com/channels/${guild.id}/${sourceChannelId}\n` +
+        `Please confirm the latest gold rate.`;
+
+    let successCount = 0;
+    for (const user of targets.values()) {
+        try {
+            await user.send(dmText);
+            successCount += 1;
+        } catch { }
+    }
+    return successCount;
+}
+
 async function createTicket(interaction, type) {
     const settings = await getSettings(interaction.guildId);
     if (!settings) {
@@ -1696,19 +1732,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!interaction.inGuild()) {
                     return interaction.reply({ content: "ERROR: This button only works inside a server channel.", ephemeral: true });
                 }
-                const settings = await getSettings(interaction.guildId);
-                if (!settings?.order_channel_id) {
-                    return interaction.reply({ content: "ERROR: Setup not found. Ask admin to run `/setup`.", ephemeral: true });
+                const sent = await notifyAdminsByDm(interaction.guild, interaction.user, interaction.channelId);
+                if (sent <= 0) {
+                    return interaction.reply({
+                        content: "WARNING: Could not DM any admin (DMs may be closed). Please DM an admin directly.",
+                        ephemeral: true,
+                    });
                 }
-                const orderCh = await interaction.guild.channels.fetch(settings.order_channel_id).catch(() => null);
-                if (!orderCh || orderCh.type !== ChannelType.GuildText) {
-                    return interaction.reply({ content: "ERROR: Admin notify channel is unavailable.", ephemeral: true });
-                }
-                await orderCh.send(
-                    `Price update request from ${interaction.user} in <#${interaction.channelId}>. ` +
-                    `Please confirm the latest gold rate.`
-                );
-                return interaction.reply({ content: "OK: Admin has been notified for updated pricing.", ephemeral: true });
+                return interaction.reply({ content: `OK: Notified ${sent} admin(s) by DM.`, ephemeral: true });
             }
 
             if (interaction.customId === "buy_gold") {

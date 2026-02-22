@@ -56,6 +56,7 @@ async function initDatabase() {
 CREATE TABLE IF NOT EXISTS settings (
   guild_id TEXT PRIMARY KEY,
   order_channel_id TEXT NOT NULL,
+  gold_price_channel_id TEXT,
   tickets_category_id TEXT NOT NULL,
   archive_category_id TEXT
 );
@@ -105,6 +106,8 @@ CREATE TABLE IF NOT EXISTS card_profiles (
   updated_at TEXT NOT NULL
 );
 `);
+
+    await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS gold_price_channel_id TEXT`);
 }
 
 async function getSettings(guildId) {
@@ -112,15 +115,16 @@ async function getSettings(guildId) {
     return res.rows[0] || null;
 }
 
-async function upsertSettings(guildId, orderChannelId, ticketsCategoryId, archiveCategoryId) {
+async function upsertSettings(guildId, orderChannelId, goldPriceChannelId, ticketsCategoryId, archiveCategoryId) {
     await db.query(
-        `INSERT INTO settings(guild_id, order_channel_id, tickets_category_id, archive_category_id)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO settings(guild_id, order_channel_id, gold_price_channel_id, tickets_category_id, archive_category_id)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT(guild_id) DO UPDATE SET
            order_channel_id = EXCLUDED.order_channel_id,
+           gold_price_channel_id = EXCLUDED.gold_price_channel_id,
            tickets_category_id = EXCLUDED.tickets_category_id,
            archive_category_id = EXCLUDED.archive_category_id`,
-        [guildId, orderChannelId, ticketsCategoryId, archiveCategoryId]
+        [guildId, orderChannelId, goldPriceChannelId, ticketsCategoryId, archiveCategoryId]
     );
 }
 
@@ -786,6 +790,44 @@ function orderButtons() {
     );
 }
 
+function isPriceStale(updatedAt) {
+    if (!updatedAt) return true;
+    const ts = Date.parse(updatedAt);
+    if (!Number.isFinite(ts)) return true;
+    return (Date.now() - ts) > 24 * 60 * 60 * 1000;
+}
+
+function goldPricePanelEmbed(currentPrice) {
+    const stale = isPriceStale(currentPrice?.updated_at);
+    const updatedAt = currentPrice?.updated_at
+        ? `\`${String(currentPrice.updated_at).replace("T", " ").slice(0, 19)}\``
+        : "`Not set`";
+    const priceText = currentPrice ? `**${currentPrice.usd_per_1m} USD / 1M**` : "**Not set yet**";
+
+    return new EmbedBuilder()
+        .setTitle("Gold Price Check")
+        .setColor(stale ? 0xf1c40f : 0x2ecc71)
+        .setDescription(
+            `Current price: ${priceText}\n` +
+            `Last updated: ${updatedAt}\n\n` +
+            `Note: Prices not updated within **1 day** are subject to change.\n` +
+            `Please DM admin or click **Notify Admin** for the latest confirmed rate.`
+        );
+}
+
+function goldPricePanelButtons() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId("price_check")
+            .setLabel("Check Current Price")
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId("notify_admin_price")
+            .setLabel("Notify Admin")
+            .setStyle(ButtonStyle.Primary)
+    );
+}
+
 function resetButtons(token) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -951,11 +993,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 await interaction.deferReply({ ephemeral: true });
 
                 const order = interaction.options.getChannel("order_channel", true);
+                const goldPriceChannel = interaction.options.getChannel("gold_price_channel", true);
                 const category = interaction.options.getChannel("tickets_category", true);
                 const archiveCategory = interaction.options.getChannel("archive_category", true);
 
                 if (order.type !== ChannelType.GuildText) {
                     return interaction.editReply({ content: "ERROR: order_channel must be a text channel." });
+                }
+                if (goldPriceChannel.type !== ChannelType.GuildText) {
+                    return interaction.editReply({ content: "ERROR: gold_price_channel must be a text channel." });
                 }
                 if (category.type !== ChannelType.GuildCategory) {
                     return interaction.editReply({ content: "ERROR: tickets_category must be a category." });
@@ -965,16 +1011,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 // Save setup
-                await upsertSettings(interaction.guildId, order.id, category.id, archiveCategory.id);
+                await upsertSettings(interaction.guildId, order.id, goldPriceChannel.id, category.id, archiveCategory.id);
 
                 // Post the panel automatically
                 await order.send({
                     embeds: [orderEmbed()],
                     components: [orderButtons()],
                 });
+                const currentPrice = await getPrice(interaction.guildId);
+                await goldPriceChannel.send({
+                    embeds: [goldPricePanelEmbed(currentPrice)],
+                    components: [goldPricePanelButtons()],
+                });
 
                 return interaction.editReply({
-                    content: `OK: Setup saved and order panel posted in <#${order.id}>.\nArchive category: **${archiveCategory.name}**`,
+                    content:
+                        `OK: Setup saved.\n` +
+                        `Order panel posted in <#${order.id}>.\n` +
+                        `Gold price panel posted in <#${goldPriceChannel.id}>.\n` +
+                        `Archive category: **${archiveCategory.name}**`,
                 });
             }
 
@@ -987,6 +1042,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (price <= 0) return interaction.editReply({ content: "ERROR: Price must be > 0." });
 
                 await upsertPrice(interaction.guildId, price, nowISO());
+                const settings = await getSettings(interaction.guildId);
+                if (settings?.gold_price_channel_id) {
+                    const priceChannel = await interaction.guild.channels.fetch(settings.gold_price_channel_id).catch(() => null);
+                    if (priceChannel && priceChannel.type === ChannelType.GuildText) {
+                        await priceChannel.send({
+                            embeds: [goldPricePanelEmbed({ usd_per_1m: price, updated_at: nowISO() })],
+                            components: [goldPricePanelButtons()],
+                        }).catch(() => null);
+                    }
+                }
                 return interaction.editReply({ content: `OK: Price updated: ${price} USD / 1M` });
             }
 
@@ -1022,9 +1087,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 const orderCh = await client.channels.fetch(settings.order_channel_id).catch(() => null);
                 if (!orderCh) return interaction.editReply({ content: "ERROR: Order channel not found. Re-run /setup." });
+                const priceCh = settings.gold_price_channel_id
+                    ? await client.channels.fetch(settings.gold_price_channel_id).catch(() => null)
+                    : null;
+                const currentPrice = await getPrice(interaction.guildId);
 
                 await orderCh.send({ embeds: [orderEmbed()], components: [orderButtons()] });
-                return interaction.editReply({ content: "OK: Posted order panel." });
+                if (priceCh && priceCh.type === ChannelType.GuildText) {
+                    await priceCh.send({ embeds: [goldPricePanelEmbed(currentPrice)], components: [goldPricePanelButtons()] });
+                }
+                return interaction.editReply({ content: "OK: Posted order panel and gold price panel." });
             }
 
             if (commandName === "deleteticket") {
@@ -1560,11 +1632,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (interaction.customId === "price_check") {
                 const p = await getPrice(interaction.guildId);
                 if (!p) return interaction.reply({ content: "WARNING: Price not set yet. Admin run `/goldprice`.", ephemeral: true });
+                const stale = isPriceStale(p.updated_at);
+                const staleLine = stale
+                    ? "\nWARNING: This price is older than 1 day and may have changed."
+                    : "\nOK: Price was updated within the last 24 hours.";
 
                 return interaction.reply({
-                    content: `Gold Current Rate: **${p.usd_per_1m} USD / 1M**`,
+                    content:
+                        `Gold Current Rate: **${p.usd_per_1m} USD / 1M**` +
+                        `\nLast updated: \`${String(p.updated_at).replace("T", " ").slice(0, 19)}\`` +
+                        staleLine,
                     ephemeral: true,
                 });
+            }
+
+            if (interaction.customId === "notify_admin_price") {
+                if (!interaction.inGuild()) {
+                    return interaction.reply({ content: "ERROR: This button only works inside a server channel.", ephemeral: true });
+                }
+                const settings = await getSettings(interaction.guildId);
+                if (!settings?.order_channel_id) {
+                    return interaction.reply({ content: "ERROR: Setup not found. Ask admin to run `/setup`.", ephemeral: true });
+                }
+                const orderCh = await interaction.guild.channels.fetch(settings.order_channel_id).catch(() => null);
+                if (!orderCh || orderCh.type !== ChannelType.GuildText) {
+                    return interaction.reply({ content: "ERROR: Admin notify channel is unavailable.", ephemeral: true });
+                }
+                await orderCh.send(
+                    `Price update request from ${interaction.user} in <#${interaction.channelId}>. ` +
+                    `Please confirm the latest gold rate.`
+                );
+                return interaction.reply({ content: "OK: Admin has been notified for updated pricing.", ephemeral: true });
             }
 
             if (interaction.customId === "buy_gold") {

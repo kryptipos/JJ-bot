@@ -4,10 +4,16 @@ const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = 
 const commands = [
     new SlashCommandBuilder()
         .setName("setup")
-        .setDescription("Save order channel + tickets category + archive category for this server")
+        .setDescription("Save order, gold-price, tickets, and archive channels for this server")
         .addChannelOption(o =>
             o.setName("order_channel")
                 .setDescription("Select the #order channel")
+                .setRequired(true)
+                .addChannelTypes(ChannelType.GuildText)
+        )
+        .addChannelOption(o =>
+            o.setName("gold_price_channel")
+                .setDescription("Select the #gold-price channel")
                 .setRequired(true)
                 .addChannelTypes(ChannelType.GuildText)
         )

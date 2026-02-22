@@ -997,6 +997,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const goldPriceOpt = interaction.options.getChannel("gold_price_channel", false);
                 const ticketsOpt = interaction.options.getChannel("tickets_category", false);
                 const archiveOpt = interaction.options.getChannel("archive_category", false);
+                const isInitialSetup = !existing;
 
                 if (orderOpt && orderOpt.type !== ChannelType.GuildText) {
                     return interaction.editReply({ content: "ERROR: order_channel must be a text channel." });
@@ -1047,22 +1048,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     return interaction.editReply({ content: "ERROR: Saved gold price channel is unavailable. Re-run /setup with gold_price_channel." });
                 }
 
-                await orderChannel.send({
-                    embeds: [orderEmbed()],
-                    components: [orderButtons()],
-                });
-                const currentPrice = await getPrice(interaction.guildId);
-                await goldPriceChannel.send({
-                    embeds: [goldPricePanelEmbed(currentPrice)],
-                    components: [goldPricePanelButtons()],
-                });
+                const shouldPostOrderPanel = isInitialSetup || Boolean(orderOpt);
+                const shouldPostPricePanel = isInitialSetup || Boolean(goldPriceOpt);
+                const resultLines = ["OK: Setup saved."];
+
+                if (shouldPostOrderPanel) {
+                    await orderChannel.send({
+                        embeds: [orderEmbed()],
+                        components: [orderButtons()],
+                    });
+                    resultLines.push(`Order panel posted in <#${orderChannel.id}>.`);
+                } else {
+                    resultLines.push(`Order channel kept: <#${orderChannel.id}>.`);
+                }
+
+                if (shouldPostPricePanel) {
+                    const currentPrice = await getPrice(interaction.guildId);
+                    await goldPriceChannel.send({
+                        embeds: [goldPricePanelEmbed(currentPrice)],
+                        components: [goldPricePanelButtons()],
+                    });
+                    resultLines.push(`Gold price panel posted in <#${goldPriceChannel.id}>.`);
+                } else {
+                    resultLines.push(`Gold price channel kept: <#${goldPriceChannel.id}>.`);
+                }
+                resultLines.push(`Archive category: **${archiveCategory?.name || archiveCategoryId}**`);
 
                 return interaction.editReply({
-                    content:
-                        `OK: Setup saved.\n` +
-                        `Order panel posted in <#${orderChannel.id}>.\n` +
-                        `Gold price panel posted in <#${goldPriceChannel.id}>.\n` +
-                        `Archive category: **${archiveCategory?.name || archiveCategoryId}**`,
+                    content: resultLines.join("\n"),
                 });
             }
 

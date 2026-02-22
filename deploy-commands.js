@@ -4,29 +4,29 @@ const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = 
 const commands = [
     new SlashCommandBuilder()
         .setName("setup")
-        .setDescription("Save order, gold-price, tickets, and archive channels for this server")
+        .setDescription("Save/update order, gold-price, tickets, and archive config for this server")
         .addChannelOption(o =>
             o.setName("order_channel")
                 .setDescription("Select the #order channel")
-                .setRequired(true)
+                .setRequired(false)
                 .addChannelTypes(ChannelType.GuildText)
         )
         .addChannelOption(o =>
             o.setName("gold_price_channel")
                 .setDescription("Select the #gold-price channel")
-                .setRequired(true)
+                .setRequired(false)
                 .addChannelTypes(ChannelType.GuildText)
         )
         .addChannelOption(o =>
             o.setName("tickets_category")
                 .setDescription("Select the Tickets category")
-                .setRequired(true)
+                .setRequired(false)
                 .addChannelTypes(ChannelType.GuildCategory)
         )
         .addChannelOption(o =>
             o.setName("archive_category")
                 .setDescription("Select the Archive category")
-                .setRequired(true)
+                .setRequired(false)
                 .addChannelTypes(ChannelType.GuildCategory)
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),

@@ -992,29 +992,62 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 await interaction.deferReply({ ephemeral: true });
 
-                const order = interaction.options.getChannel("order_channel", true);
-                const goldPriceChannel = interaction.options.getChannel("gold_price_channel", true);
-                const category = interaction.options.getChannel("tickets_category", true);
-                const archiveCategory = interaction.options.getChannel("archive_category", true);
+                const existing = await getSettings(interaction.guildId);
+                const orderOpt = interaction.options.getChannel("order_channel", false);
+                const goldPriceOpt = interaction.options.getChannel("gold_price_channel", false);
+                const ticketsOpt = interaction.options.getChannel("tickets_category", false);
+                const archiveOpt = interaction.options.getChannel("archive_category", false);
 
-                if (order.type !== ChannelType.GuildText) {
+                if (orderOpt && orderOpt.type !== ChannelType.GuildText) {
                     return interaction.editReply({ content: "ERROR: order_channel must be a text channel." });
                 }
-                if (goldPriceChannel.type !== ChannelType.GuildText) {
+                if (goldPriceOpt && goldPriceOpt.type !== ChannelType.GuildText) {
                     return interaction.editReply({ content: "ERROR: gold_price_channel must be a text channel." });
                 }
-                if (category.type !== ChannelType.GuildCategory) {
+                if (ticketsOpt && ticketsOpt.type !== ChannelType.GuildCategory) {
                     return interaction.editReply({ content: "ERROR: tickets_category must be a category." });
                 }
-                if (archiveCategory.type !== ChannelType.GuildCategory) {
+                if (archiveOpt && archiveOpt.type !== ChannelType.GuildCategory) {
                     return interaction.editReply({ content: "ERROR: archive_category must be a category." });
                 }
 
-                // Save setup
-                await upsertSettings(interaction.guildId, order.id, goldPriceChannel.id, category.id, archiveCategory.id);
+                const orderChannelId = orderOpt?.id || existing?.order_channel_id || null;
+                const goldPriceChannelId = goldPriceOpt?.id || existing?.gold_price_channel_id || null;
+                const ticketsCategoryId = ticketsOpt?.id || existing?.tickets_category_id || null;
+                const archiveCategoryId = archiveOpt?.id || existing?.archive_category_id || null;
 
-                // Post the panel automatically
-                await order.send({
+                const missing = [];
+                if (!orderChannelId) missing.push("order_channel");
+                if (!goldPriceChannelId) missing.push("gold_price_channel");
+                if (!ticketsCategoryId) missing.push("tickets_category");
+                if (!archiveCategoryId) missing.push("archive_category");
+                if (missing.length > 0) {
+                    return interaction.editReply({
+                        content:
+                            `ERROR: Missing required setup value(s): ${missing.join(", ")}.\n` +
+                            `Provide them in /setup now (only missing ones are required).`,
+                    });
+                }
+
+                await upsertSettings(
+                    interaction.guildId,
+                    orderChannelId,
+                    goldPriceChannelId,
+                    ticketsCategoryId,
+                    archiveCategoryId
+                );
+
+                const orderChannel = await interaction.guild.channels.fetch(orderChannelId).catch(() => null);
+                const goldPriceChannel = await interaction.guild.channels.fetch(goldPriceChannelId).catch(() => null);
+                const archiveCategory = await interaction.guild.channels.fetch(archiveCategoryId).catch(() => null);
+                if (!orderChannel || orderChannel.type !== ChannelType.GuildText) {
+                    return interaction.editReply({ content: "ERROR: Saved order channel is unavailable. Re-run /setup with order_channel." });
+                }
+                if (!goldPriceChannel || goldPriceChannel.type !== ChannelType.GuildText) {
+                    return interaction.editReply({ content: "ERROR: Saved gold price channel is unavailable. Re-run /setup with gold_price_channel." });
+                }
+
+                await orderChannel.send({
                     embeds: [orderEmbed()],
                     components: [orderButtons()],
                 });
@@ -1027,9 +1060,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 return interaction.editReply({
                     content:
                         `OK: Setup saved.\n` +
-                        `Order panel posted in <#${order.id}>.\n` +
+                        `Order panel posted in <#${orderChannel.id}>.\n` +
                         `Gold price panel posted in <#${goldPriceChannel.id}>.\n` +
-                        `Archive category: **${archiveCategory.name}**`,
+                        `Archive category: **${archiveCategory?.name || archiveCategoryId}**`,
                 });
             }
 

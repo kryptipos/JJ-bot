@@ -235,7 +235,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
-<div class="top"><div class="hero">${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="server logo"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1><div class="muted" style="font-size:12px">${escapeHtml(shortDiscordId(data.discordId))}</div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
+<div class="top"><div class="hero">${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="server logo"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
 <section class="member-card">
   <div class="member-card-grid">
     <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>

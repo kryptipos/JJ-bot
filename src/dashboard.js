@@ -155,6 +155,7 @@ async function getUserDashboardData(db, client, discordId) {
 
     return {
         discordId,
+        isAdmin: isAdminDiscordId(discordId),
         username: user?.username || null,
         avatarUrl: user?.displayAvatarURL ? user.displayAvatarURL({ extension: "png", size: 128 }) : null,
         guildRole,
@@ -178,6 +179,9 @@ function renderUserDashboardHtml(data) {
     const rows = data.purchases.map((p) => `
       <tr><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 40))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td>${formatTimestamp(p.created_at)}</td></tr>`).join("");
     const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
+    const adminLink = data.isAdmin
+        ? `<div style="margin-top:10px"><a href="/admin" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#1a2433;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Go to Admin Dashboard</a></div>`
+        : "";
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>
 <style>
 body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
@@ -188,7 +192,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:700px){.cards{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}}
 </style></head><body><div class="wrap">
-<div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0">My Dashboard</h1><div>${escapeHtml(userLabel)} <span class="muted">(${escapeHtml(shortDiscordId(data.discordId))})</span></div></div></div><div><a href="/logout">Logout</a></div></div>
+<div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0">My Dashboard</h1><div>${escapeHtml(userLabel)} <span class="muted">(${escapeHtml(shortDiscordId(data.discordId))})</span></div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
 <div class="cards panel">
 <div class="card"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
 <div class="card"><div class="k">Role/Tier</div><div class="v" style="font-size:18px">${escapeHtml(data.guildRole || "None")}</div></div>

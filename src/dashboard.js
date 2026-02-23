@@ -177,6 +177,27 @@ async function getUserDashboardData(db, client, discordId) {
     };
 }
 
+async function getDiscordOrderChannelUrl(db) {
+    const guildId = process.env.GUILD_ID;
+    let row = null;
+    if (guildId) {
+        const res = await db.query(`SELECT guild_id, order_channel_id FROM settings WHERE guild_id = $1`, [guildId]);
+        row = res.rows[0] || null;
+    }
+    if (!row) {
+        const res = await db.query(`SELECT guild_id, order_channel_id FROM settings ORDER BY guild_id LIMIT 1`);
+        row = res.rows[0] || null;
+    }
+    if (!row?.guild_id || !row?.order_channel_id) return null;
+    return `https://discord.com/channels/${row.guild_id}/${row.order_channel_id}`;
+}
+
+function getDiscordServerUrl() {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) return "https://discord.com/app";
+    return `https://discord.com/channels/${guildId}`;
+}
+
 function renderUserDashboardHtml(data) {
     const rows = data.purchases.map((p) => `
       <tr><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 40))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td>${formatTimestamp(p.created_at)}</td></tr>`).join("");
@@ -245,10 +266,10 @@ function renderAccessDeniedHtml() {
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">Access Denied</h1><p>You are logged in, but you do not have admin access to the global dashboard.</p><p><a href="/me">Go to My Dashboard</a></p></div></div></body></html>`;
 }
 
-function renderSimpleActionPage({ title, message, backHref = "/me" }) {
+function renderSimpleActionPage({ title, message, backHref = "/me", primaryLinkHref = null, primaryLinkLabel = null }) {
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(title)}</title>
 <style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:760px;margin:60px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}</style>
-</head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
+</head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${primaryLinkHref ? `<p><a href="${escapeHtml(primaryLinkHref)}" target="_blank" rel="noreferrer">${escapeHtml(primaryLinkLabel || "Open Discord")}</a></p>` : ""}<p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
 }
 
 async function resolveUserLabels(client, ids) {
@@ -435,18 +456,28 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
                     return;
                 }
-                const title =
-                    url.pathname === "/me/tip"
-                        ? "Tip (Coming Soon)"
-                        : url.pathname === "/me/buy-gold"
-                            ? "Buy Gold (Coming Soon)"
-                            : "Buy Boost (Coming Soon)";
+                if (url.pathname === "/me/buy-gold" || url.pathname === "/me/buy-boost") {
+                    const orderUrl = await getDiscordOrderChannelUrl(db);
+                    if (orderUrl) {
+                        sendRedirect(res, orderUrl);
+                        return;
+                    }
+                }
+
+                const title = url.pathname === "/me/tip" ? "Tip via Discord" : "Open Discord to Continue";
                 const message =
                     url.pathname === "/me/tip"
-                        ? "Web tip form will be added next. For now, use the Discord tip button/command."
-                        : "Web purchase request flow will be added next. For now, use the Discord buy buttons in your server.";
+                        ? "Tip uses the Discord bot interaction right now. Click below to open your server and use the Tip button/command."
+                        : "Your order channel is not configured yet in the dashboard backend. Open Discord and use the bot buttons in your server.";
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(renderSimpleActionPage({ title, message }));
+                res.end(
+                    renderSimpleActionPage({
+                        title,
+                        message,
+                        primaryLinkHref: getDiscordServerUrl(),
+                        primaryLinkLabel: "Open Discord Server",
+                    })
+                );
                 return;
             }
 

@@ -236,6 +236,37 @@ function renderUserDashboardHtml(data) {
         Rare: "#3498db",
         Common: "#95a5a6",
     })[data.guildRole || "Common"] || "#95a5a6";
+    const tierTheme = ({
+        Legendary: {
+            glowA: "rgba(243,156,18,.22)",
+            glowB: "rgba(231,76,60,.14)",
+            bg1: "#1b1510",
+            bg2: "#121018",
+        },
+        Epic: {
+            glowA: "rgba(155,89,182,.24)",
+            glowB: "rgba(76,141,255,.12)",
+            bg1: "#171224",
+            bg2: "#10131d",
+        },
+        Rare: {
+            glowA: "rgba(52,152,219,.24)",
+            glowB: "rgba(47,196,166,.12)",
+            bg1: "#111a26",
+            bg2: "#0f151f",
+        },
+        Common: {
+            glowA: "rgba(149,165,166,.18)",
+            glowB: "rgba(76,141,255,.10)",
+            bg1: "#131922",
+            bg2: "#10161f",
+        },
+    })[data.guildRole || "Common"] || {
+        glowA: "rgba(149,165,166,.18)",
+        glowB: "rgba(76,141,255,.10)",
+        bg1: "#131922",
+        bg2: "#10161f",
+    };
     const faviconUrl = getDashboardLogoUrl(data.guildIconUrl || data.avatarUrl);
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>
@@ -244,12 +275,12 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-s
 .hero{display:flex;gap:10px;align-items:center}.hero img{width:40px;height:40px;border-radius:50%;border:2px solid #2a3340}.muted{color:#9fb0c3}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.card{background:#141a22;border:1px solid #2a3340;border-radius:12px;padding:12px}.k{color:#9fb0c3;font-size:12px}.v{font-size:22px;font-weight:700;margin-top:6px}
 .member-card{margin-top:14px;border-radius:18px;padding:16px;border:1px solid #2a3340;background:
- radial-gradient(500px 220px at 90% -10%, rgba(76,141,255,.20), transparent 60%),
- radial-gradient(420px 220px at 0% 100%, rgba(47,196,166,.15), transparent 60%),
- linear-gradient(180deg,#131922,#10161f);}
+ radial-gradient(520px 240px at 90% -10%, ${tierTheme.glowA}, transparent 62%),
+ radial-gradient(420px 220px at 0% 100%, ${tierTheme.glowB}, transparent 60%),
+ linear-gradient(180deg,${tierTheme.bg1},${tierTheme.bg2}); box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 12px 30px rgba(0,0,0,.18);}
 .member-card-grid{display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:center}
 .avatar-big{width:108px;height:108px;border-radius:50%;border:4px solid ${tierColor};object-fit:cover;background:#0b0f14}
-.tier-pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:rgba(255,255,255,.02);font-weight:700;font-size:12px}
+.tier-pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:color-mix(in srgb, ${tierColor} 10%, transparent);font-weight:700;font-size:12px;box-shadow:0 0 0 1px rgba(255,255,255,.02) inset}
 .member-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
 .member-stat{background:#0f141b;border:1px solid #263140;border-radius:12px;padding:10px}
 .meta-chip{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:7px 10px;border-radius:999px;border:1px solid #2a3340;background:linear-gradient(180deg,#111723,#0e141d);color:#b8c7d8;font-size:12px}

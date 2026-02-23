@@ -26,6 +26,22 @@ function formatTimestamp(ts) {
     return escapeHtml(String(ts || "").replace("T", " ").slice(0, 19));
 }
 
+function formatPrettyTimestamp(ts) {
+    if (!ts) return "-";
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return formatTimestamp(ts);
+    return escapeHtml(
+        d.toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        })
+    );
+}
+
 function formatGold(n) {
     const value = Number(n) || 0;
     if (value >= 1_000_000) {
@@ -255,7 +271,7 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
         <div class="member-stat"><div class="k">Total Spent</div><div class="v" style="font-size:18px">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
         <div class="member-stat"><div class="k">Purchases</div><div class="v" style="font-size:18px">${data.purchases.length}</div></div>
       </div>
-      <div class="meta-chip"><strong>Last Updated</strong><span>${data.member ? formatTimestamp(data.member.updated_at) : "-"}</span></div>
+      <div class="meta-chip"><strong>Last Updated</strong><span>${data.member ? formatPrettyTimestamp(data.member.updated_at) : "-"}</span></div>
     </div>
   </div>
 </section>

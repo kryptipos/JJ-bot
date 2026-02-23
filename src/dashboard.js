@@ -173,8 +173,13 @@ async function getUserDashboardData(db, client, discordId) {
         }
         const member = guild ? await guild.members.fetch(discordId).catch(() => null) : null;
         if (member) {
-            const roleNames = member.roles.cache.map((r) => r.name);
-            guildRole = ["Legendary", "Epic", "Rare", "Common"].find((n) => roleNames.includes(n)) || null;
+            const roleNames = member.roles.cache.map((r) => String(r.name || ""));
+            const normalizedRoles = roleNames.map((n) => n.toLowerCase());
+            const tierOrder = ["legendary", "epic", "rare", "common"];
+            const foundTier = tierOrder.find((tier) =>
+                normalizedRoles.some((roleName) => roleName === tier || roleName.includes(tier))
+            );
+            guildRole = foundTier ? foundTier.charAt(0).toUpperCase() + foundTier.slice(1) : null;
         }
     }
 

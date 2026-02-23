@@ -335,7 +335,8 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     return;
                 }
                 const state = crypto.randomBytes(16).toString("hex");
-                oauthStates.set(state, Date.now());
+                const next = url.searchParams.get("next") || "/me";
+                oauthStates.set(state, { createdAt: Date.now(), next });
                 sendRedirect(res, buildDiscordOAuthUrl(state));
                 return;
             }
@@ -348,6 +349,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     res.end("Invalid OAuth callback.");
                     return;
                 }
+                const oauthState = oauthStates.get(state);
                 oauthStates.delete(state);
                 const token = await exchangeCodeForToken(code);
                 const user = await fetchDiscordUser(token.access_token);
@@ -359,7 +361,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 });
                 sendRedirect(
                     res,
-                    "/me",
+                    oauthState?.next || "/me",
                     [`jj_dash_session=${encodeURIComponent(newSessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`]
                 );
                 return;
@@ -373,7 +375,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
 
             if (url.pathname === "/me") {
                 if (!session?.discordId) {
-                    sendRedirect(res, "/login");
+                    sendRedirect(res, "/login?next=%2Fme");
                     return;
                 }
                 const data = await getUserDashboardData(db, client, session.discordId);
@@ -384,7 +386,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
 
             if (url.pathname === "/admin") {
                 if (!session?.discordId) {
-                    sendRedirect(res, "/login");
+                    sendRedirect(res, "/login?next=%2Fadmin");
                     return;
                 }
                 if (!isAdminDiscordId(session.discordId)) {

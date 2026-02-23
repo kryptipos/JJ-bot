@@ -236,6 +236,8 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-s
 .tier-pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:rgba(255,255,255,.02);font-weight:700;font-size:12px}
 .member-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
 .member-stat{background:#0f141b;border:1px solid #263140;border-radius:12px;padding:10px}
+.meta-chip{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:7px 10px;border-radius:999px;border:1px solid #2a3340;background:linear-gradient(180deg,#111723,#0e141d);color:#b8c7d8;font-size:12px}
+.meta-chip strong{color:#d8e6f5;font-weight:700}
 table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #2a3340;text-align:left;font-size:13px}th{color:#9fb0c3}
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
@@ -253,7 +255,7 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
         <div class="member-stat"><div class="k">Total Spent</div><div class="v" style="font-size:18px">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
         <div class="member-stat"><div class="k">Purchases</div><div class="v" style="font-size:18px">${data.purchases.length}</div></div>
       </div>
-      <div class="muted" style="margin-top:10px;font-size:12px">Last Updated: ${data.member ? formatTimestamp(data.member.updated_at) : "-"}</div>
+      <div class="meta-chip"><strong>Last Updated</strong><span>${data.member ? formatTimestamp(data.member.updated_at) : "-"}</span></div>
     </div>
   </div>
 </section>

@@ -171,7 +171,9 @@ async function getUserDashboardData(db, client, discordId) {
         if (guild?.iconURL) {
             guildIconUrl = guild.iconURL({ extension: "png", size: 128 }) || null;
         }
-        const member = guild ? await guild.members.fetch(discordId).catch(() => null) : null;
+        const member = guild
+            ? await guild.members.fetch({ user: discordId, force: true }).catch(() => null)
+            : null;
         if (member) {
             const roleNames = member.roles.cache.map((r) => String(r.name || ""));
             const normalizedRoles = roleNames.map((n) => n.toLowerCase());

@@ -69,6 +69,21 @@ function getOAuthConfig() {
     };
 }
 
+function getAdminIdSet() {
+    const raw = process.env.DASHBOARD_ADMIN_IDS || "";
+    return new Set(
+        raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+    );
+}
+
+function isAdminDiscordId(discordId) {
+    if (!discordId) return false;
+    return getAdminIdSet().has(String(discordId));
+}
+
 function buildDiscordOAuthUrl(state) {
     const { clientId, baseUrl } = getOAuthConfig();
     const redirectUri = `${baseUrl.replace(/\/$/, "")}/auth/callback`;
@@ -182,6 +197,12 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 <section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
 <table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No purchases yet.</td></tr>'}</tbody></table>
 </section></div></body></html>`;
+}
+
+function renderAccessDeniedHtml() {
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Access Denied</title>
+<style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:720px;margin:80px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}</style>
+</head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">Access Denied</h1><p>You are logged in, but you do not have admin access to the global dashboard.</p><p><a href="/me">Go to My Dashboard</a></p></div></div></body></html>`;
 }
 
 async function resolveUserLabels(client, ids) {
@@ -361,9 +382,47 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 return;
             }
 
+            if (url.pathname === "/admin") {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login");
+                    return;
+                }
+                if (!isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+                    res.end(renderAccessDeniedHtml());
+                    return;
+                }
+                const data = await getDashboardData(db, nowISO, getLatestPrice, client);
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderDashboardHtml(data));
+                return;
+            }
+
+            if (url.pathname === "/") {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login");
+                    return;
+                }
+                if (isAdminDiscordId(session.discordId)) {
+                    sendRedirect(res, "/admin");
+                } else {
+                    sendRedirect(res, "/me");
+                }
+                return;
+            }
+
             const data = await getDashboardData(db, nowISO, getLatestPrice, client);
 
             if (url.pathname === "/api/overview") {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login");
+                    return;
+                }
+                if (!isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ error: "forbidden" }));
+                    return;
+                }
                 res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
                 res.end(JSON.stringify(data));
                 return;
@@ -373,13 +432,6 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 res.end("Not found");
                 return;
             }
-
-            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-            const html = renderDashboardHtml(data).replace(
-                "</div></body></html>",
-                `<div style="margin-top:10px"><a href="/me">My Dashboard (Discord Login)</a></div></div></body></html>`
-            );
-            res.end(html);
         } catch (err) {
             console.error("Dashboard request error:", err);
             res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });

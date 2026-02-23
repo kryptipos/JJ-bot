@@ -127,7 +127,7 @@ async function fetchDiscordUser(accessToken) {
 }
 
 async function getUserDashboardData(db, client, discordId) {
-    const [memberRes, purchasesRes] = await Promise.all([
+    const [memberRes, purchasesRes, totalSpentRes] = await Promise.all([
         db.query(`SELECT balance_gold, updated_at FROM members WHERE discord_id = $1`, [discordId]),
         db.query(
             `SELECT kind, details, gold_cost, balance_after, created_at
@@ -137,6 +137,7 @@ async function getUserDashboardData(db, client, discordId) {
              LIMIT 25`,
             [discordId]
         ),
+        db.query(`SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE discord_id = $1`, [discordId]),
     ]);
 
     let user = client?.users?.cache?.get(discordId) || null;
@@ -159,6 +160,7 @@ async function getUserDashboardData(db, client, discordId) {
         username: user?.username || null,
         avatarUrl: user?.displayAvatarURL ? user.displayAvatarURL({ extension: "png", size: 128 }) : null,
         guildRole,
+        totalSpentGold: toInt(totalSpentRes.rows[0]?.total_gold),
         member: memberRes.rows[0]
             ? {
                   balance_gold: toInt(memberRes.rows[0].balance_gold),
@@ -182,17 +184,47 @@ function renderUserDashboardHtml(data) {
     const adminLink = data.isAdmin
         ? `<div style="margin-top:10px"><a href="/admin" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#1a2433;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Go to Admin Dashboard</a></div>`
         : "";
+    const tierColor = ({
+        Legendary: "#f39c12",
+        Epic: "#9b59b6",
+        Rare: "#3498db",
+        Common: "#95a5a6",
+    })[data.guildRole || "Common"] || "#95a5a6";
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>
 <style>
 body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
 .top{display:flex;justify-content:space-between;align-items:center;gap:12px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px;margin-top:14px}
 .hero{display:flex;gap:14px;align-items:center}.hero img{width:56px;height:56px;border-radius:50%;border:2px solid #2a3340}.muted{color:#9fb0c3}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.card{background:#141a22;border:1px solid #2a3340;border-radius:12px;padding:12px}.k{color:#9fb0c3;font-size:12px}.v{font-size:22px;font-weight:700;margin-top:6px}
+.member-card{margin-top:14px;border-radius:18px;padding:16px;border:1px solid #2a3340;background:
+ radial-gradient(500px 220px at 90% -10%, rgba(76,141,255,.20), transparent 60%),
+ radial-gradient(420px 220px at 0% 100%, rgba(47,196,166,.15), transparent 60%),
+ linear-gradient(180deg,#131922,#10161f);}
+.member-card-grid{display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:center}
+.avatar-big{width:108px;height:108px;border-radius:50%;border:4px solid ${tierColor};object-fit:cover;background:#0b0f14}
+.tier-pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:rgba(255,255,255,.02);font-weight:700;font-size:12px}
+.member-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.member-stat{background:#0f141b;border:1px solid #263140;border-radius:12px;padding:10px}
 table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #2a3340;text-align:left;font-size:13px}th{color:#9fb0c3}
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
-@media(max-width:700px){.cards{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}}
+@media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
 <div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0">My Dashboard</h1><div>${escapeHtml(userLabel)} <span class="muted">(${escapeHtml(shortDiscordId(data.discordId))})</span></div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
+<section class="member-card">
+  <div class="member-card-grid">
+    <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>
+    <div>
+      <div class="tier-pill">${escapeHtml((data.guildRole || "Member") + " Tier")}</div>
+      <h2 style="margin:10px 0 4px;font-size:26px">${escapeHtml(userLabel)}</h2>
+      <div class="muted">Member Card</div>
+      <div class="member-stats">
+        <div class="member-stat"><div class="k">Balance</div><div class="v" style="font-size:18px">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
+        <div class="member-stat"><div class="k">Total Spent</div><div class="v" style="font-size:18px">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
+        <div class="member-stat"><div class="k">Purchases</div><div class="v" style="font-size:18px">${data.purchases.length}</div></div>
+      </div>
+    </div>
+  </div>
+</section>
 <div class="cards panel">
 <div class="card"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
 <div class="card"><div class="k">Role/Tier</div><div class="v" style="font-size:18px">${escapeHtml(data.guildRole || "None")}</div></div>

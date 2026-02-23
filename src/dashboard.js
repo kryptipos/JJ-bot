@@ -222,14 +222,18 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
         <div class="member-stat"><div class="k">Total Spent</div><div class="v" style="font-size:18px">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
         <div class="member-stat"><div class="k">Purchases</div><div class="v" style="font-size:18px">${data.purchases.length}</div></div>
       </div>
+      <div class="muted" style="margin-top:10px;font-size:12px">Last Updated: ${data.member ? formatTimestamp(data.member.updated_at) : "-"}</div>
     </div>
   </div>
 </section>
-<div class="cards panel">
-<div class="card"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
-<div class="card"><div class="k">Role/Tier</div><div class="v" style="font-size:18px">${escapeHtml(data.guildRole || "None")}</div></div>
-<div class="card"><div class="k">Last Updated</div><div class="v" style="font-size:16px">${data.member ? formatTimestamp(data.member.updated_at) : "-"}</div></div>
-</div>
+<section class="panel">
+  <h2 style="margin:0 0 10px">Actions</h2>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="/me/tip" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#162331;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Tip</a>
+    <a href="/me/buy-gold" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#1e2816;border:1px solid #304224;color:#e6edf3;text-decoration:none">Buy Gold</a>
+    <a href="/me/buy-boost" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#2a1e12;border:1px solid #4a311d;color:#e6edf3;text-decoration:none">Buy Boost</a>
+  </div>
+</section>
 <section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
 <table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No purchases yet.</td></tr>'}</tbody></table>
 </section></div></body></html>`;
@@ -239,6 +243,12 @@ function renderAccessDeniedHtml() {
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Access Denied</title>
 <style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:720px;margin:80px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}</style>
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">Access Denied</h1><p>You are logged in, but you do not have admin access to the global dashboard.</p><p><a href="/me">Go to My Dashboard</a></p></div></div></body></html>`;
+}
+
+function renderSimpleActionPage({ title, message, backHref = "/me" }) {
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(title)}</title>
+<style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:760px;margin:60px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}</style>
+</head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
 }
 
 async function resolveUserLabels(client, ids) {
@@ -417,6 +427,26 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 const data = await getUserDashboardData(db, client, session.discordId);
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
                 res.end(renderUserDashboardHtml(data));
+                return;
+            }
+
+            if (url.pathname === "/me/tip" || url.pathname === "/me/buy-gold" || url.pathname === "/me/buy-boost") {
+                if (!session?.discordId) {
+                    sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
+                    return;
+                }
+                const title =
+                    url.pathname === "/me/tip"
+                        ? "Tip (Coming Soon)"
+                        : url.pathname === "/me/buy-gold"
+                            ? "Buy Gold (Coming Soon)"
+                            : "Buy Boost (Coming Soon)";
+                const message =
+                    url.pathname === "/me/tip"
+                        ? "Web tip form will be added next. For now, use the Discord tip button/command."
+                        : "Web purchase request flow will be added next. For now, use the Discord buy buttons in your server.";
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderSimpleActionPage({ title, message }));
                 return;
             }
 

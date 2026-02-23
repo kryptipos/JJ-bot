@@ -79,6 +79,10 @@ function getAdminIdSet() {
     );
 }
 
+function getDashboardLogoUrl(fallback = null) {
+    return process.env.DASHBOARD_LOGO_URL || fallback || null;
+}
+
 function isAdminDiscordId(discordId) {
     if (!discordId) return false;
     return getAdminIdSet().has(String(discordId));
@@ -216,7 +220,8 @@ function renderUserDashboardHtml(data) {
         Rare: "#3498db",
         Common: "#95a5a6",
     })[data.guildRole || "Common"] || "#95a5a6";
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>
+    const faviconUrl = getDashboardLogoUrl(data.guildIconUrl || data.avatarUrl);
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>
 body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
 .top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px;margin-top:14px}
@@ -264,13 +269,15 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 }
 
 function renderAccessDeniedHtml() {
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Access Denied</title>
+    const faviconUrl = getDashboardLogoUrl();
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Access Denied</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:720px;margin:80px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}</style>
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">Access Denied</h1><p>You are logged in, but you do not have admin access to the global dashboard.</p><p><a href="/me">Go to My Dashboard</a></p></div></div></body></html>`;
 }
 
 function renderSimpleActionPage({ title, message, backHref = "/me", primaryLinkHref = null, primaryLinkLabel = null }) {
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(title)}</title>
+    const faviconUrl = getDashboardLogoUrl();
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtml(title)}</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:760px;margin:60px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}</style>
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${primaryLinkHref ? `<p><a href="${escapeHtml(primaryLinkHref)}" target="_blank" rel="noreferrer">${escapeHtml(primaryLinkLabel || "Open Discord")}</a></p>` : ""}<p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
 }
@@ -323,9 +330,16 @@ async function getDashboardData(db, nowISO, getLatestPrice, client) {
         ...recentPurchasesRes.rows.map((r) => r.discord_id),
     ];
     const userLabels = await resolveUserLabels(client, allIds);
+    let guildIconUrl = null;
+    const guildId = process.env.GUILD_ID;
+    if (guildId && client?.guilds) {
+        const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
+        if (guild?.iconURL) guildIconUrl = guild.iconURL({ extension: "png", size: 128 }) || null;
+    }
 
     return {
         generatedAt: nowISO(),
+        guildIconUrl,
         memberCount: toInt(memberCountRes.rows[0]?.c),
         purchaseCount: toInt(purchaseCountRes.rows[0]?.c),
         settingsCount: toInt(settingsCountRes.rows[0]?.c),
@@ -355,11 +369,12 @@ function renderDashboardHtml(data) {
     const purchaseRows = data.recentPurchases.map((p) => `
       <tr><td>${escapeHtml(p.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(p.discord_id))}</code></small></td><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 32))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td><small>${formatTimestamp(p.created_at)}</small></td></tr>`).join("");
 
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Balance Bot Dashboard</title>
+    const brandLogo = getDashboardLogoUrl(data.guildIconUrl || null);
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Balance Bot Dashboard</title>${brandLogo ? `<link rel="icon" href="${escapeHtml(brandLogo)}"/>` : ""}
 <style>
 :root{--bg:#0d1117;--panel:#161b22;--line:#2a3340;--txt:#e6edf3;--muted:#9fb0c3;--acc:#4c8dff}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 90% -10%,#1a2a50,transparent 60%),radial-gradient(800px 500px at -10% 10%,#15352f,transparent 60%),var(--bg);color:var(--txt);font-family:Segoe UI,Arial,sans-serif}
-.wrap{max-width:1200px;margin:0 auto;padding:18px}.hero{display:flex;justify-content:space-between;gap:12px;align-items:end}.hero h1{margin:0}.hero p{margin:4px 0 0;color:var(--muted)}
+  .wrap{max-width:1200px;margin:0 auto;padding:18px}.hero{display:flex;justify-content:space-between;gap:12px;align-items:end}.hero h1{margin:0}.hero p{margin:4px 0 0;color:var(--muted)}.brand{display:flex;gap:12px;align-items:center}.brand img{width:42px;height:42px;border-radius:50%;border:2px solid var(--line);object-fit:cover}
 .pill{padding:8px 10px;border-radius:999px;border:1px solid rgba(76,141,255,.4);background:rgba(76,141,255,.12);font-size:12px}
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}.card{background:linear-gradient(180deg,var(--panel),#1b2230);border:1px solid var(--line);border-radius:14px;padding:14px}.k{color:var(--muted);font-size:12px}.v{font-size:24px;font-weight:700;margin-top:6px}.sub{color:var(--muted);font-size:12px;margin-top:6px}
 .split{display:grid;grid-template-columns:1.05fr .95fr;gap:12px}.panel{background:linear-gradient(180deg,var(--panel),#151c26);border:1px solid var(--line);border-radius:14px;padding:12px}.panel h2{margin:0 0 10px;font-size:16px}
@@ -367,7 +382,7 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--li
 .links{margin-top:8px}.links a{color:var(--acc);text-decoration:none}.links a:hover{text-decoration:underline}
 @media (max-width:900px){.cards{grid-template-columns:1fr 1fr}.split{grid-template-columns:1fr}}@media (max-width:560px){.cards{grid-template-columns:1fr}.hero{flex-direction:column;align-items:start}}
 </style></head><body>
-<div class="wrap"><div class="hero"><div><h1>Balance Bot Dashboard</h1><p>Web view for balances, purchases, and price status.</p></div><div class="pill">${formatTimestamp(data.generatedAt)} UTC</div></div>
+  <div class="wrap"><div class="hero"><div class="brand">${brandLogo ? `<img src="${escapeHtml(brandLogo)}" alt="logo"/>` : ""}<div><h1>Balance Bot Dashboard</h1><p>Web view for balances, purchases, and price status.</p></div></div><div class="pill">${formatTimestamp(data.generatedAt)} UTC</div></div>
 <div class="cards">
 <div class="card"><div class="k">Members</div><div class="v">${data.memberCount}</div><div class="sub">Tracked users</div></div>
 <div class="card"><div class="k">Purchases</div><div class="v">${data.purchaseCount}</div><div class="sub">Recorded purchases</div></div>

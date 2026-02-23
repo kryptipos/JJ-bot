@@ -1782,7 +1782,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 async function start() {
     await initDatabase();
-    startDashboardServer({ db, nowISO, getLatestPrice, port: DASHBOARD_PORT });
+    startDashboardServer({ db, nowISO, getLatestPrice, client, port: DASHBOARD_PORT });
     await client.login(process.env.DISCORD_TOKEN);
 }
 
@@ -1790,6 +1790,7 @@ start().catch((err) => {
     console.error("Fatal startup error:", err);
     process.exit(1);
 });
+
 
 
 

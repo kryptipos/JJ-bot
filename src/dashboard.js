@@ -1,4 +1,5 @@
 const http = require("http");
+const crypto = require("crypto");
 
 function toInt(value) {
     if (value === null || value === undefined) return 0;
@@ -38,7 +39,175 @@ function formatGold(n) {
     return String(value);
 }
 
-async function getDashboardData(db, nowISO, getLatestPrice) {
+function parseCookies(req) {
+    const raw = req.headers.cookie || "";
+    const out = {};
+    for (const part of raw.split(";")) {
+        const [k, ...rest] = part.trim().split("=");
+        if (!k) continue;
+        out[k] = decodeURIComponent(rest.join("=") || "");
+    }
+    return out;
+}
+
+function sendRedirect(res, location, cookieHeaders = []) {
+    const headers = { Location: location };
+    if (cookieHeaders.length) headers["Set-Cookie"] = cookieHeaders;
+    res.writeHead(302, headers);
+    res.end();
+}
+
+function getOAuthConfig() {
+    const clientId = process.env.CLIENT_ID;
+    const clientSecret = process.env.CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET;
+    const baseUrl = process.env.DASHBOARD_BASE_URL;
+    return {
+        clientId,
+        clientSecret,
+        baseUrl,
+        enabled: Boolean(clientId && clientSecret && baseUrl),
+    };
+}
+
+function buildDiscordOAuthUrl(state) {
+    const { clientId, baseUrl } = getOAuthConfig();
+    const redirectUri = `${baseUrl.replace(/\/$/, "")}/auth/callback`;
+    const qs = new URLSearchParams({
+        client_id: clientId,
+        response_type: "code",
+        redirect_uri: redirectUri,
+        scope: "identify",
+        prompt: "none",
+        state,
+    });
+    return `https://discord.com/api/oauth2/authorize?${qs.toString()}`;
+}
+
+async function exchangeCodeForToken(code) {
+    const { clientId, clientSecret, baseUrl } = getOAuthConfig();
+    const redirectUri = `${baseUrl.replace(/\/$/, "")}/auth/callback`;
+    const body = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+    });
+
+    const resp = await fetch("https://discord.com/api/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+    });
+    if (!resp.ok) throw new Error(`oauth_token_${resp.status}`);
+    return resp.json();
+}
+
+async function fetchDiscordUser(accessToken) {
+    const resp = await fetch("https://discord.com/api/users/@me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!resp.ok) throw new Error(`oauth_user_${resp.status}`);
+    return resp.json();
+}
+
+async function getUserDashboardData(db, client, discordId) {
+    const [memberRes, purchasesRes] = await Promise.all([
+        db.query(`SELECT balance_gold, updated_at FROM members WHERE discord_id = $1`, [discordId]),
+        db.query(
+            `SELECT kind, details, gold_cost, balance_after, created_at
+             FROM purchases
+             WHERE discord_id = $1
+             ORDER BY id DESC
+             LIMIT 25`,
+            [discordId]
+        ),
+    ]);
+
+    let user = client?.users?.cache?.get(discordId) || null;
+    if (!user && client) user = await client.users.fetch(discordId).catch(() => null);
+
+    let guildRole = null;
+    const guildId = process.env.GUILD_ID;
+    if (guildId && client?.guilds) {
+        const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
+        const member = guild ? await guild.members.fetch(discordId).catch(() => null) : null;
+        if (member) {
+            const roleNames = member.roles.cache.map((r) => r.name);
+            guildRole = ["Legendary", "Epic", "Rare", "Common"].find((n) => roleNames.includes(n)) || null;
+        }
+    }
+
+    return {
+        discordId,
+        username: user?.username || null,
+        avatarUrl: user?.displayAvatarURL ? user.displayAvatarURL({ extension: "png", size: 128 }) : null,
+        guildRole,
+        member: memberRes.rows[0]
+            ? {
+                  balance_gold: toInt(memberRes.rows[0].balance_gold),
+                  updated_at: memberRes.rows[0].updated_at,
+              }
+            : null,
+        purchases: purchasesRes.rows.map((r) => ({
+            kind: r.kind,
+            details: r.details,
+            gold_cost: toInt(r.gold_cost),
+            balance_after: toInt(r.balance_after),
+            created_at: r.created_at,
+        })),
+    };
+}
+
+function renderUserDashboardHtml(data) {
+    const rows = data.purchases.map((p) => `
+      <tr><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 40))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td>${formatTimestamp(p.created_at)}</td></tr>`).join("");
+    const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>
+<style>
+body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px;margin-top:14px}
+.hero{display:flex;gap:14px;align-items:center}.hero img{width:56px;height:56px;border-radius:50%;border:2px solid #2a3340}.muted{color:#9fb0c3}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.card{background:#141a22;border:1px solid #2a3340;border-radius:12px;padding:12px}.k{color:#9fb0c3;font-size:12px}.v{font-size:22px;font-weight:700;margin-top:6px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #2a3340;text-align:left;font-size:13px}th{color:#9fb0c3}
+a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
+@media(max-width:700px){.cards{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}}
+</style></head><body><div class="wrap">
+<div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0">My Dashboard</h1><div>${escapeHtml(userLabel)} <span class="muted">(${escapeHtml(shortDiscordId(data.discordId))})</span></div></div></div><div><a href="/logout">Logout</a></div></div>
+<div class="cards panel">
+<div class="card"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
+<div class="card"><div class="k">Role/Tier</div><div class="v" style="font-size:18px">${escapeHtml(data.guildRole || "None")}</div></div>
+<div class="card"><div class="k">Last Updated</div><div class="v" style="font-size:16px">${data.member ? formatTimestamp(data.member.updated_at) : "-"}</div></div>
+</div>
+<section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
+<table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No purchases yet.</td></tr>'}</tbody></table>
+</section></div></body></html>`;
+}
+
+async function resolveUserLabels(client, ids) {
+    const uniqueIds = [...new Set(ids.filter(Boolean).map(String))];
+    const labels = new Map();
+    if (!client) return labels;
+
+    for (const id of uniqueIds) {
+        try {
+            const cached = client.users?.cache?.get(id);
+            if (cached) {
+                labels.set(id, cached.username || cached.tag || id);
+                continue;
+            }
+            const user = await client.users.fetch(id).catch(() => null);
+            if (user) {
+                labels.set(id, user.username || user.tag || id);
+            }
+        } catch {
+            // ignore lookup failures; UI will fall back to ID
+        }
+    }
+    return labels;
+}
+
+async function getDashboardData(db, nowISO, getLatestPrice, client) {
     const [memberCountRes, purchaseCountRes, settingsCountRes, latestPrice, topMembersRes, recentPurchasesRes] = await Promise.all([
         db.query(`SELECT COUNT(*) AS c FROM members`),
         db.query(`SELECT COUNT(*) AS c FROM purchases`),
@@ -58,6 +227,12 @@ async function getDashboardData(db, nowISO, getLatestPrice) {
         ),
     ]);
 
+    const allIds = [
+        ...topMembersRes.rows.map((r) => r.discord_id),
+        ...recentPurchasesRes.rows.map((r) => r.discord_id),
+    ];
+    const userLabels = await resolveUserLabels(client, allIds);
+
     return {
         generatedAt: nowISO(),
         memberCount: toInt(memberCountRes.rows[0]?.c),
@@ -66,11 +241,13 @@ async function getDashboardData(db, nowISO, getLatestPrice) {
         latestPrice,
         topMembers: topMembersRes.rows.map((r) => ({
             discord_id: r.discord_id,
+            user_label: userLabels.get(String(r.discord_id)) || null,
             balance_gold: toInt(r.balance_gold),
             updated_at: r.updated_at,
         })),
         recentPurchases: recentPurchasesRes.rows.map((r) => ({
             discord_id: r.discord_id,
+            user_label: userLabels.get(String(r.discord_id)) || null,
             kind: r.kind,
             details: r.details,
             gold_cost: toInt(r.gold_cost),
@@ -83,9 +260,9 @@ async function getDashboardData(db, nowISO, getLatestPrice) {
 function renderDashboardHtml(data) {
     const priceText = data.latestPrice ? `${data.latestPrice.usd_per_1m} USD / 1M` : "Not set";
     const topRows = data.topMembers.map((m, i) => `
-      <tr><td>${i + 1}</td><td><code>${escapeHtml(shortDiscordId(m.discord_id))}</code></td><td>${escapeHtml(formatGold(m.balance_gold))}</td><td><small>${formatTimestamp(m.updated_at)}</small></td></tr>`).join("");
+      <tr><td>${i + 1}</td><td>${escapeHtml(m.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(m.discord_id))}</code></small></td><td>${escapeHtml(formatGold(m.balance_gold))}</td><td><small>${formatTimestamp(m.updated_at)}</small></td></tr>`).join("");
     const purchaseRows = data.recentPurchases.map((p) => `
-      <tr><td><code>${escapeHtml(shortDiscordId(p.discord_id))}</code></td><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 32))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td><small>${formatTimestamp(p.created_at)}</small></td></tr>`).join("");
+      <tr><td>${escapeHtml(p.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(p.discord_id))}</code></small></td><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 32))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td><small>${formatTimestamp(p.created_at)}</small></td></tr>`).join("");
 
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Balance Bot Dashboard</title>
 <style>
@@ -112,18 +289,79 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--li
 </div></div></body></html>`;
 }
 
-function startDashboardServer({ db, nowISO, getLatestPrice, port }) {
+function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
     const listenPort = Number(port || process.env.DASHBOARD_PORT || process.env.PORT || 3000);
+    const sessions = new Map();
+    const oauthStates = new Map();
     const server = http.createServer(async (req, res) => {
         try {
             const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+            const cookies = parseCookies(req);
+            const sessionId = cookies.jj_dash_session;
+            const session = sessionId ? sessions.get(sessionId) : null;
+
             if (url.pathname === "/health") {
                 res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
                 res.end(JSON.stringify({ ok: true, service: "balance-bot-dashboard" }));
                 return;
             }
 
-            const data = await getDashboardData(db, nowISO, getLatestPrice);
+            if (url.pathname === "/login") {
+                const cfg = getOAuthConfig();
+                if (!cfg.enabled) {
+                    res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+                    res.end("Discord OAuth not configured. Set CLIENT_ID, CLIENT_SECRET, DASHBOARD_BASE_URL.");
+                    return;
+                }
+                const state = crypto.randomBytes(16).toString("hex");
+                oauthStates.set(state, Date.now());
+                sendRedirect(res, buildDiscordOAuthUrl(state));
+                return;
+            }
+
+            if (url.pathname === "/auth/callback") {
+                const code = url.searchParams.get("code");
+                const state = url.searchParams.get("state");
+                if (!code || !state || !oauthStates.has(state)) {
+                    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+                    res.end("Invalid OAuth callback.");
+                    return;
+                }
+                oauthStates.delete(state);
+                const token = await exchangeCodeForToken(code);
+                const user = await fetchDiscordUser(token.access_token);
+                const newSessionId = crypto.randomBytes(24).toString("hex");
+                sessions.set(newSessionId, {
+                    discordId: String(user.id),
+                    username: user.username || null,
+                    createdAt: Date.now(),
+                });
+                sendRedirect(
+                    res,
+                    "/me",
+                    [`jj_dash_session=${encodeURIComponent(newSessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`]
+                );
+                return;
+            }
+
+            if (url.pathname === "/logout") {
+                if (sessionId) sessions.delete(sessionId);
+                sendRedirect(res, "/", ["jj_dash_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"]);
+                return;
+            }
+
+            if (url.pathname === "/me") {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login");
+                    return;
+                }
+                const data = await getUserDashboardData(db, client, session.discordId);
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderUserDashboardHtml(data));
+                return;
+            }
+
+            const data = await getDashboardData(db, nowISO, getLatestPrice, client);
 
             if (url.pathname === "/api/overview") {
                 res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -137,7 +375,11 @@ function startDashboardServer({ db, nowISO, getLatestPrice, port }) {
             }
 
             res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-            res.end(renderDashboardHtml(data));
+            const html = renderDashboardHtml(data).replace(
+                "</div></body></html>",
+                `<div style="margin-top:10px"><a href="/me">My Dashboard (Discord Login)</a></div></div></body></html>`
+            );
+            res.end(html);
         } catch (err) {
             console.error("Dashboard request error:", err);
             res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });

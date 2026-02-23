@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 
 const {
     Client,
@@ -18,6 +18,7 @@ const {
 
 const { Pool } = require("pg");
 const { createCanvas, loadImage, registerFont } = require("canvas");
+const { startDashboardServer } = require("./dashboard");
 
 try {
     registerFont(require.resolve("dejavu-fonts-ttf/ttf/DejaVuSans.ttf"), {
@@ -33,6 +34,7 @@ try {
 }
 
 const DATABASE_URL = process.env.DATABASE_URL;
+const DASHBOARD_PORT = Number(process.env.DASHBOARD_PORT || process.env.PORT || 3000);
 
 if (!DATABASE_URL) {
     throw new Error("DATABASE_URL is required. Add Railway Postgres DATABASE_URL to service variables.");
@@ -1780,6 +1782,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 async function start() {
     await initDatabase();
+    startDashboardServer({ db, nowISO, getLatestPrice, port: DASHBOARD_PORT });
     await client.login(process.env.DISCORD_TOKEN);
 }
 
@@ -1787,3 +1790,8 @@ start().catch((err) => {
     console.error("Fatal startup error:", err);
     process.exit(1);
 });
+
+
+
+
+

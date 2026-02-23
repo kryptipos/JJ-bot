@@ -144,9 +144,13 @@ async function getUserDashboardData(db, client, discordId) {
     if (!user && client) user = await client.users.fetch(discordId).catch(() => null);
 
     let guildRole = null;
+    let guildIconUrl = null;
     const guildId = process.env.GUILD_ID;
     if (guildId && client?.guilds) {
         const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
+        if (guild?.iconURL) {
+            guildIconUrl = guild.iconURL({ extension: "png", size: 128 }) || null;
+        }
         const member = guild ? await guild.members.fetch(discordId).catch(() => null) : null;
         if (member) {
             const roleNames = member.roles.cache.map((r) => r.name);
@@ -159,6 +163,7 @@ async function getUserDashboardData(db, client, discordId) {
         isAdmin: isAdminDiscordId(discordId),
         username: user?.username || null,
         avatarUrl: user?.displayAvatarURL ? user.displayAvatarURL({ extension: "png", size: 128 }) : null,
+        guildIconUrl,
         guildRole,
         totalSpentGold: toInt(totalSpentRes.rows[0]?.total_gold),
         member: memberRes.rows[0]
@@ -230,7 +235,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
-<div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1><div class="muted" style="font-size:12px">${escapeHtml(shortDiscordId(data.discordId))}</div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
+<div class="top"><div class="hero">${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="server logo"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1><div class="muted" style="font-size:12px">${escapeHtml(shortDiscordId(data.discordId))}</div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
 <section class="member-card">
   <div class="member-card-grid">
     <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>
@@ -250,9 +255,7 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 <section class="panel">
   <h2 style="margin:0 0 10px">Actions</h2>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a href="/me/tip" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#162331;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Tip</a>
-    <a href="/me/buy-gold" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#1e2816;border:1px solid #304224;color:#e6edf3;text-decoration:none">Buy Gold</a>
-    <a href="/me/buy-boost" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#2a1e12;border:1px solid #4a311d;color:#e6edf3;text-decoration:none">Buy Boost</a>
+    <a href="/me/order" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#1e2816;border:1px solid #304224;color:#e6edf3;text-decoration:none">Order Gold / Boost</a>
   </div>
 </section>
 <section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
@@ -451,29 +454,21 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 return;
             }
 
-            if (url.pathname === "/me/tip" || url.pathname === "/me/buy-gold" || url.pathname === "/me/buy-boost") {
+            if (url.pathname === "/me/order") {
                 if (!session?.discordId) {
                     sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
                     return;
                 }
-                if (url.pathname === "/me/buy-gold" || url.pathname === "/me/buy-boost") {
-                    const orderUrl = await getDiscordOrderChannelUrl(db);
-                    if (orderUrl) {
-                        sendRedirect(res, orderUrl);
-                        return;
-                    }
+                const orderUrl = await getDiscordOrderChannelUrl(db);
+                if (orderUrl) {
+                    sendRedirect(res, orderUrl);
+                    return;
                 }
-
-                const title = url.pathname === "/me/tip" ? "Tip via Discord" : "Open Discord to Continue";
-                const message =
-                    url.pathname === "/me/tip"
-                        ? "Tip uses the Discord bot interaction right now. Click below to open your server and use the Tip button/command."
-                        : "Your order channel is not configured yet in the dashboard backend. Open Discord and use the bot buttons in your server.";
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
                 res.end(
                     renderSimpleActionPage({
-                        title,
-                        message,
+                        title: "Order Gold / Boost",
+                        message: "Your order channel is not configured yet in the dashboard backend. Open Discord and use the bot buttons in your server.",
                         primaryLinkHref: getDiscordServerUrl(),
                         primaryLinkLabel: "Open Discord Server",
                     })

@@ -193,8 +193,8 @@ function renderUserDashboardHtml(data) {
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>
 <style>
 body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
-.top{display:flex;justify-content:space-between;align-items:center;gap:12px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px;margin-top:14px}
-.hero{display:flex;gap:14px;align-items:center}.hero img{width:56px;height:56px;border-radius:50%;border:2px solid #2a3340}.muted{color:#9fb0c3}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px;margin-top:14px}
+.hero{display:flex;gap:10px;align-items:center}.hero img{width:40px;height:40px;border-radius:50%;border:2px solid #2a3340}.muted{color:#9fb0c3}
 .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.card{background:#141a22;border:1px solid #2a3340;border-radius:12px;padding:12px}.k{color:#9fb0c3;font-size:12px}.v{font-size:22px;font-weight:700;margin-top:6px}
 .member-card{margin-top:14px;border-radius:18px;padding:16px;border:1px solid #2a3340;background:
  radial-gradient(500px 220px at 90% -10%, rgba(76,141,255,.20), transparent 60%),
@@ -209,7 +209,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
-<div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0">My Dashboard</h1><div>${escapeHtml(userLabel)} <span class="muted">(${escapeHtml(shortDiscordId(data.discordId))})</span></div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
+<div class="top"><div class="hero">${data.avatarUrl ? `<img src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1><div class="muted" style="font-size:12px">${escapeHtml(shortDiscordId(data.discordId))}</div>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
 <section class="member-card">
   <div class="member-card-grid">
     <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>

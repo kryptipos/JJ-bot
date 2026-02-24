@@ -486,11 +486,12 @@ async function resolveUserLabels(client, ids) {
 }
 
 async function getDashboardData(db, nowISO, getLatestPrice, client) {
-    const [memberCountRes, purchaseCountRes, settingsCountRes, latestPrice, topMembersRes, recentPurchasesRes] = await Promise.all([
+    const [memberCountRes, purchaseCountRes, settingsCountRes, latestPrice, allPricesRes, topMembersRes, recentPurchasesRes] = await Promise.all([
         db.query(`SELECT COUNT(*) AS c FROM members`),
         db.query(`SELECT COUNT(*) AS c FROM purchases`),
         db.query(`SELECT COUNT(*) AS c FROM settings`),
         getLatestPrice(),
+        db.query(`SELECT guild_id, usd_per_1m, updated_at FROM prices ORDER BY updated_at DESC`),
         db.query(
             `SELECT discord_id, balance_gold, updated_at
              FROM members
@@ -524,6 +525,11 @@ async function getDashboardData(db, nowISO, getLatestPrice, client) {
         purchaseCount: toInt(purchaseCountRes.rows[0]?.c),
         settingsCount: toInt(settingsCountRes.rows[0]?.c),
         latestPrice,
+        pricesByGuild: allPricesRes.rows.map((r) => ({
+            guild_id: String(r.guild_id),
+            usd_per_1m: Number(r.usd_per_1m),
+            updated_at: r.updated_at,
+        })),
         topMembers: topMembersRes.rows.map((r) => ({
             discord_id: r.discord_id,
             user_label: userLabels.get(String(r.discord_id)) || null,
@@ -543,7 +549,19 @@ async function getDashboardData(db, nowISO, getLatestPrice, client) {
 }
 
 function renderDashboardHtml(data) {
-    const priceText = data.latestPrice ? `${data.latestPrice.usd_per_1m} USD / 1M` : "Not set";
+    const distinctPriceCount = new Set((data.pricesByGuild || []).map((p) => String(p.usd_per_1m))).size;
+    const hasMultipleGuildPrices = (data.pricesByGuild || []).length > 1;
+    const showMixedPrices = hasMultipleGuildPrices && distinctPriceCount > 1;
+    const priceText = showMixedPrices
+        ? "Per-guild prices"
+        : data.latestPrice
+            ? `${data.latestPrice.usd_per_1m} USD / 1M`
+            : "Not set";
+    const priceSubtext = showMixedPrices
+        ? `${(data.pricesByGuild || []).length} guild price rows`
+        : data.latestPrice
+            ? formatTimestamp(data.latestPrice.updated_at)
+            : "No price set";
     const topRows = data.topMembers.map((m, i) => `
       <tr><td>${i + 1}</td><td>${escapeHtml(m.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(m.discord_id))}</code></small></td><td>${escapeHtml(formatGold(m.balance_gold))}</td><td><small>${formatTimestamp(m.updated_at)}</small></td></tr>`).join("");
     const purchaseRows = data.recentPurchases.map((p) => `
@@ -567,7 +585,7 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--li
 <div class="card"><div class="k">Members</div><div class="v">${data.memberCount}</div><div class="sub">Tracked users</div></div>
 <div class="card"><div class="k">Purchases</div><div class="v">${data.purchaseCount}</div><div class="sub">Recorded purchases</div></div>
 <div class="card"><div class="k">Guild Settings</div><div class="v">${data.settingsCount}</div><div class="sub">Configured guild rows</div></div>
-<div class="card"><div class="k">Latest Price</div><div class="v" style="font-size:18px">${escapeHtml(priceText)}</div><div class="sub">${data.latestPrice ? formatTimestamp(data.latestPrice.updated_at) : "No price set"}</div></div>
+<div class="card"><div class="k">${showMixedPrices ? "Prices" : "Latest Price"}</div><div class="v" style="font-size:18px">${escapeHtml(priceText)}</div><div class="sub">${escapeHtml(priceSubtext)}</div></div>
 </div>
 <div class="split">
 <section class="panel"><h2>Top Balances</h2><table><thead><tr><th>#</th><th>User</th><th>Balance</th><th>Updated</th></tr></thead><tbody>${topRows || '<tr><td colspan="4">No member records.</td></tr>'}</tbody></table><div class="links"><a href="/api/overview" target="_blank" rel="noreferrer">Open JSON API</a></div></section>

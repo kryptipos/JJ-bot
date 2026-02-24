@@ -452,6 +452,14 @@ function renderScopedDashboardHtml(data) {
         .replace('<div class="links"><a href="/api/overview"', `<div class="links"><a href="/guilds">Back to My Servers</a> · <a href="/api/g/${encodeURIComponent(data.guildId)}/overview"`);
 }
 
+function renderAdminScopedDashboardHtml(data) {
+    const html = renderScopedDashboardHtml(data);
+    return html.replace(
+        '<a href="/me" style="color:#68a3ff;text-decoration:none">My Dashboard</a>',
+        '<a href="/admin/global" style="color:#68a3ff;text-decoration:none">Global Overview</a><a href="/me" style="color:#68a3ff;text-decoration:none">My Dashboard</a>'
+    );
+}
+
 function renderAccessDeniedHtml() {
     const faviconUrl = getDashboardLogoUrl();
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Access Denied</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
@@ -707,6 +715,29 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
             if (url.pathname === "/admin") {
                 if (!session?.discordId) {
                     sendRedirect(res, "/login?next=%2Fadmin");
+                    return;
+                }
+                if (!isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+                    res.end(renderAccessDeniedHtml());
+                    return;
+                }
+                const mainGuildId = process.env.GUILD_ID;
+                if (!mainGuildId) {
+                    const data = await getDashboardData(db, nowISO, getLatestPrice, client);
+                    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                    res.end(renderDashboardHtml(data));
+                    return;
+                }
+                const data = await getGuildDashboardData(db, nowISO, getLatestPrice, client, mainGuildId);
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderAdminScopedDashboardHtml(data));
+                return;
+            }
+
+            if (url.pathname === "/admin/global") {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login?next=%2Fadmin%2Fglobal");
                     return;
                 }
                 if (!isAdminDiscordId(session.discordId)) {

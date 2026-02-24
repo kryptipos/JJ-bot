@@ -1097,22 +1097,32 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const resultLines = ["OK: Setup saved."];
 
                 if (shouldPostOrderPanel) {
-                    await orderChannel.send({
-                        embeds: [orderEmbed()],
-                        components: [orderButtons()],
-                    });
-                    resultLines.push(`Order panel posted in <#${orderChannel.id}>.`);
+                    try {
+                        await orderChannel.send({
+                            embeds: [orderEmbed()],
+                            components: [orderButtons()],
+                        });
+                        resultLines.push(`Order panel posted in <#${orderChannel.id}>.`);
+                    } catch (err) {
+                        console.error("Failed to post order panel during /setup:", err);
+                        resultLines.push(`WARNING: Setup saved, but failed to post order panel in <#${orderChannel.id}>. Check bot channel permissions.`);
+                    }
                 } else {
                     resultLines.push(`Order channel kept: <#${orderChannel.id}>.`);
                 }
 
                 if (shouldPostPricePanel) {
                     const currentPrice = await getPrice(interaction.guildId);
-                    await goldPriceChannel.send({
-                        embeds: [goldPricePanelEmbed(currentPrice)],
-                        components: [goldPricePanelButtons()],
-                    });
-                    resultLines.push(`Gold price panel posted in <#${goldPriceChannel.id}>.`);
+                    try {
+                        await goldPriceChannel.send({
+                            embeds: [goldPricePanelEmbed(currentPrice)],
+                            components: [goldPricePanelButtons()],
+                        });
+                        resultLines.push(`Gold price panel posted in <#${goldPriceChannel.id}>.`);
+                    } catch (err) {
+                        console.error("Failed to post price panel during /setup:", err);
+                        resultLines.push(`WARNING: Setup saved, but failed to post gold price panel in <#${goldPriceChannel.id}>. Check bot channel permissions.`);
+                    }
                 } else {
                     resultLines.push(`Gold price channel kept: <#${goldPriceChannel.id}>.`);
                 }

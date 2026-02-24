@@ -663,7 +663,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     return;
                 }
                 const state = crypto.randomBytes(16).toString("hex");
-                const next = url.searchParams.get("next") || "/me";
+                const next = url.searchParams.get("next") || "/dashboard";
                 oauthStates.set(state, { createdAt: Date.now(), next });
                 sendRedirect(res, buildDiscordOAuthUrl(state));
                 return;
@@ -689,7 +689,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 });
                 sendRedirect(
                     res,
-                    oauthState?.next || "/me",
+                    oauthState?.next || "/dashboard",
                     [`jj_dash_session=${encodeURIComponent(newSessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`]
                 );
                 return;
@@ -703,7 +703,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
 
             if (url.pathname === "/me") {
                 if (!session?.discordId) {
-                    sendRedirect(res, "/login?next=%2Fme");
+                    sendRedirect(res, "/login?next=%2Fdashboard");
                     return;
                 }
                 const requestedGuildId = url.searchParams.get("guild") || null;
@@ -721,9 +721,9 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 return;
             }
 
-            if (url.pathname === "/guilds") {
+            if (url.pathname === "/dashboard" || url.pathname === "/guilds") {
                 if (!session?.discordId) {
-                    sendRedirect(res, "/login?next=%2Fguilds");
+                    sendRedirect(res, "/login?next=%2Fdashboard");
                     return;
                 }
                 const guilds = await getManageableGuilds(db, client, session.discordId);
@@ -825,13 +825,13 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
 
             if (url.pathname === "/") {
                 if (!session?.discordId) {
-                    sendRedirect(res, "/login");
+                    sendRedirect(res, "/login?next=%2Fdashboard");
                     return;
                 }
                 if (isAdminDiscordId(session.discordId)) {
                     sendRedirect(res, "/admin");
                 } else {
-                    sendRedirect(res, "/me");
+                    sendRedirect(res, "/dashboard");
                 }
                 return;
             }

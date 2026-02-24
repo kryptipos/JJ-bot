@@ -151,8 +151,11 @@ async function upsertPrice(guildId, usdPer1m, updatedAt) {
     );
 }
 
-async function getMember(discordId) {
-    const res = await db.query(`SELECT balance_gold, updated_at FROM members WHERE discord_id = $1`, [discordId]);
+async function getMember(guildId, discordId) {
+    const res = await db.query(
+        `SELECT balance_gold, updated_at FROM members WHERE guild_id = $1 AND discord_id = $2`,
+        [guildId, discordId]
+    );
     if (!res.rows[0]) return null;
     return {
         balance_gold: toInt(res.rows[0].balance_gold),
@@ -160,42 +163,42 @@ async function getMember(discordId) {
     };
 }
 
-async function insertMember(discordId, balanceGold, updatedAt) {
+async function insertMember(guildId, discordId, balanceGold, updatedAt) {
     await db.query(
-        `INSERT INTO members(discord_id, balance_gold, updated_at) VALUES ($1, $2, $3)`,
-        [discordId, balanceGold, updatedAt]
+        `INSERT INTO members(guild_id, discord_id, balance_gold, updated_at) VALUES ($1, $2, $3, $4)`,
+        [guildId, discordId, balanceGold, updatedAt]
     );
 }
 
-async function updateMember(balanceGold, updatedAt, discordId) {
+async function updateMember(guildId, balanceGold, updatedAt, discordId) {
     await db.query(
-        `UPDATE members SET balance_gold = $1, updated_at = $2 WHERE discord_id = $3`,
-        [balanceGold, updatedAt, discordId]
+        `UPDATE members SET balance_gold = $2, updated_at = $3 WHERE guild_id = $1 AND discord_id = $4`,
+        [guildId, balanceGold, updatedAt, discordId]
     );
 }
 
-async function deleteMember(discordId) {
-    const res = await db.query(`DELETE FROM members WHERE discord_id = $1`, [discordId]);
+async function deleteMember(guildId, discordId) {
+    const res = await db.query(`DELETE FROM members WHERE guild_id = $1 AND discord_id = $2`, [guildId, discordId]);
     return res.rowCount || 0;
 }
 
-async function insertPurchase(discordId, kind, details, goldCost, balanceAfter, createdAt) {
+async function insertPurchase(guildId, discordId, kind, details, goldCost, balanceAfter, createdAt) {
     await db.query(
-        `INSERT INTO purchases(discord_id, kind, details, gold_cost, balance_after, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [discordId, kind, details, goldCost, balanceAfter, createdAt]
+        `INSERT INTO purchases(guild_id, discord_id, kind, details, gold_cost, balance_after, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [guildId, discordId, kind, details, goldCost, balanceAfter, createdAt]
     );
 }
 
-async function getHistoryForUser(discordId, limit = 10) {
+async function getHistoryForUser(guildId, discordId, limit = 10) {
     const safeLimit = Math.max(1, Math.min(50, toInt(limit) || 10));
     const res = await db.query(
         `SELECT kind, details, gold_cost, balance_after, created_at
          FROM purchases
-         WHERE discord_id = $1
+         WHERE guild_id = $1 AND discord_id = $2
          ORDER BY id DESC
-         LIMIT $2`,
-        [discordId, safeLimit]
+         LIMIT $3`,
+        [guildId, discordId, safeLimit]
     );
     return res.rows.map((r) => ({
         ...r,
@@ -204,28 +207,28 @@ async function getHistoryForUser(discordId, limit = 10) {
     }));
 }
 
-async function deletePurchasesForUser(discordId) {
-    const res = await db.query(`DELETE FROM purchases WHERE discord_id = $1`, [discordId]);
+async function deletePurchasesForUser(guildId, discordId) {
+    const res = await db.query(`DELETE FROM purchases WHERE guild_id = $1 AND discord_id = $2`, [guildId, discordId]);
     return res.rowCount || 0;
 }
 
-async function getTotalBought(discordId) {
+async function getTotalBought(guildId, discordId) {
     const res = await db.query(
-        `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE discord_id = $1`,
-        [discordId]
+        `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE guild_id = $1 AND discord_id = $2`,
+        [guildId, discordId]
     );
     return { total_gold: toInt(res.rows[0]?.total_gold) };
 }
 
-async function getUserStats(discordId) {
+async function getUserStats(guildId, discordId) {
     const [member, total, purchaseStats] = await Promise.all([
-        getMember(discordId),
-        getTotalBought(discordId),
+        getMember(guildId, discordId),
+        getTotalBought(guildId, discordId),
         db.query(
             `SELECT COUNT(*) AS purchase_count, MAX(created_at) AS last_purchase_at
              FROM purchases
-             WHERE discord_id = $1`,
-            [discordId]
+             WHERE guild_id = $1 AND discord_id = $2`,
+            [guildId, discordId]
         ),
     ]);
 
@@ -1259,7 +1262,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const balance = interaction.options.getInteger("balance", true);
                 if (balance < 0) return interaction.editReply({ content: "ERROR: Balance cannot be negative." });
 
-                const existing = await getMember(user.id);
+                const guildId = interaction.guildId;
+                const existing = await getMember(guildId, user.id);
                 if (existing) {
                     return interaction.editReply({
                         content: `WARNING: Member already exists with **${formatGold(existing.balance_gold)}**. Use **/addbal**.`,
@@ -1267,9 +1271,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 const updatedAt = nowISO();
-                await insertMember(user.id, balance, updatedAt);
+                await insertMember(guildId, user.id, balance, updatedAt);
 
-                const totalBoughtGold = (await getTotalBought(user.id)).total_gold;
+                const totalBoughtGold = (await getTotalBought(guildId, user.id)).total_gold;
                 let tierName = getTierForTotalBought(totalBoughtGold).name;
                 try {
                     tierName = await syncBuyerTierRole(interaction.guild, user.id, totalBoughtGold);
@@ -1303,11 +1307,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const amount = interaction.options.getInteger("amount", true);
                 if (amount <= 0) return interaction.editReply({ content: "ERROR: Amount must be > 0." });
 
-                const existing = await getMember(user.id);
+                const guildId = interaction.guildId;
+                const existing = await getMember(guildId, user.id);
                 if (!existing) return interaction.editReply({ content: `ERROR: No member record for ${user}. Use **/mc** first.` });
 
                 const newBalance = existing.balance_gold + amount;
-                await updateMember(newBalance, nowISO(), user.id);
+                await updateMember(guildId, newBalance, nowISO(), user.id);
 
                 return interaction.editReply({
                     content: `OK: Added **${formatGold(amount)}** to ${user}. New balance: **${formatGold(newBalance)}**.`,
@@ -1318,7 +1323,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
 
                 const user = interaction.options.getUser("user", true);
-                const existing = await getMember(user.id);
+                const guildId = interaction.guildId;
+                const existing = await getMember(guildId, user.id);
                 if (!existing) return interaction.reply({ content: `ERROR: No member record for ${user}. Use **/mc** first.`, ephemeral: true });
 
                 const token = `${interaction.user.id}:${user.id}:${Date.now()}`;
@@ -1351,13 +1357,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const goldCost = interaction.options.getInteger("gold_cost", true);
                 if (goldCost <= 0) return interaction.editReply({ content: "ERROR: gold_cost must be > 0." });
 
-                const member = await getMember(user.id);
+                const guildId = interaction.guildId;
+                const member = await getMember(guildId, user.id);
                 if (!member) return interaction.editReply({ content: `ERROR: ${user} has no member card. Use /mc first.` });
 
                 const newBalance = member.balance_gold - goldCost;
-                await updateMember(newBalance, nowISO(), user.id);
-                await insertPurchase(user.id, kind, details, goldCost, newBalance, nowISO());
-                const totalBoughtGold = (await getTotalBought(user.id)).total_gold;
+                await updateMember(guildId, newBalance, nowISO(), user.id);
+                await insertPurchase(guildId, user.id, kind, details, goldCost, newBalance, nowISO());
+                const totalBoughtGold = (await getTotalBought(guildId, user.id)).total_gold;
 
                 let tierName = getTierForTotalBought(totalBoughtGold).name;
                 try {
@@ -1398,7 +1405,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (commandName === "history") {
                 await interaction.deferReply({ ephemeral: true });
 
-                const rows = await getHistoryForUser(interaction.user.id, 10);
+                const guildId = interaction.guildId;
+                const rows = await getHistoryForUser(guildId, interaction.user.id, 10);
                 if (!rows || rows.length === 0) return interaction.editReply({ content: "No purchases yet." });
 
                 const lines = rows.map((r, i) => {
@@ -1417,7 +1425,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 await interaction.deferReply({ ephemeral: true });
 
                 const user = interaction.options.getUser("user", true);
-                const rows = await getHistoryForUser(user.id, 10);
+                const guildId = interaction.guildId;
+                const rows = await getHistoryForUser(guildId, user.id, 10);
                 if (!rows || rows.length === 0) return interaction.editReply({ content: `No purchases for ${user} yet.` });
 
                 const lines = rows.map((r, i) => {
@@ -1435,7 +1444,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 await interaction.deferReply({ ephemeral: true });
 
                 const user = interaction.options.getUser("user", true);
-                const stats = await getUserStats(user.id);
+                const guildId = interaction.guildId;
+                const stats = await getUserStats(guildId, user.id);
                 if (!stats.member) {
                     return interaction.editReply({ content: `No member record for ${user}.` });
                 }
@@ -1489,10 +1499,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (commandName === "me") {
                 await interaction.deferReply({ ephemeral: true });
 
-                const row = await getMember(interaction.user.id);
+                const guildId = interaction.guildId || process.env.GUILD_ID;
+                const row = await getMember(guildId, interaction.user.id);
                 if (!row) return interaction.editReply({ content: "ERROR: You don't have a member record yet." });
 
-                const totalBoughtGold = (await getTotalBought(interaction.user.id)).total_gold;
+                const totalBoughtGold = (await getTotalBought(guildId, interaction.user.id)).total_gold;
                 let tierName;
                 if (interaction.inGuild()) {
                     const guildMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
@@ -1517,7 +1528,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     return interaction.reply({ content: "ERROR: Tip amount must be a positive integer.", ephemeral: true });
                 }
 
-                const member = await getMember(interaction.user.id);
+                const guildId = interaction.guildId || process.env.GUILD_ID;
+                const member = await getMember(guildId, interaction.user.id);
                 if (!member) {
                     return interaction.reply({ content: "ERROR: You don't have a member record yet.", ephemeral: true });
                 }
@@ -1532,8 +1544,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 const newBalance = member.balance_gold - amount;
-                await updateMember(newBalance, nowISO(), interaction.user.id);
+                await updateMember(guildId, newBalance, nowISO(), interaction.user.id);
                 await insertPurchase(
+                    guildId,
                     interaction.user.id,
                     "tip",
                     note ? `Tip: ${note}` : "Tip",
@@ -1542,7 +1555,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     nowISO()
                 );
 
-                const totalBoughtGold = (await getTotalBought(interaction.user.id)).total_gold;
+                const totalBoughtGold = (await getTotalBought(guildId, interaction.user.id)).total_gold;
                 let tierName = getTierForTotalBought(totalBoughtGold).name;
                 try {
                     const guild = interaction.inGuild()
@@ -1687,14 +1700,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     return interaction.update({ content: "OK: Reset canceled.", components: [] });
                 }
 
-                const member = await getMember(payload.targetUserId);
+                const guildId = payload.guildId || interaction.guildId;
+                const member = await getMember(guildId, payload.targetUserId);
                 if (!member) {
                     pendingBalanceResets.delete(token);
                     return interaction.update({ content: "ERROR: Member record no longer exists.", components: [] });
                 }
 
-                await deleteMember(payload.targetUserId);
-                const deleted = await deletePurchasesForUser(payload.targetUserId);
+                await deleteMember(guildId, payload.targetUserId);
+                const deleted = await deletePurchasesForUser(guildId, payload.targetUserId);
                 pendingBalanceResets.delete(token);
                 try {
                     await clearBuyerTierRoles(interaction.guild, payload.targetUserId);

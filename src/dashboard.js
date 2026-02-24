@@ -250,6 +250,33 @@ async function getManageableGuilds(db, client, discordId) {
     return out;
 }
 
+async function getUserDataGuilds(db, client, discordId) {
+    const res = await db.query(
+        `SELECT guild_id, MAX(last_seen) AS last_seen
+         FROM (
+           SELECT guild_id, updated_at::text AS last_seen FROM members WHERE discord_id = $1
+           UNION ALL
+           SELECT guild_id, created_at::text AS last_seen FROM purchases WHERE discord_id = $1
+         ) t
+         GROUP BY guild_id
+         ORDER BY MAX(last_seen) DESC`,
+        [discordId]
+    );
+
+    const out = [];
+    for (const row of res.rows) {
+        const guildId = String(row.guild_id);
+        const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId).catch(() => null);
+        out.push({
+            guildId,
+            name: guild?.name || `Guild ${guildId}`,
+            iconUrl: guild?.iconURL ? guild.iconURL({ extension: "png", size: 128 }) : null,
+            lastSeen: row.last_seen || null,
+        });
+    }
+    return out;
+}
+
 async function getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId) {
     const [memberCountRes, purchaseCountRes, settingsRes, topMembersRes, recentPurchasesRes, latestPrice] = await Promise.all([
         db.query(`SELECT COUNT(*) AS c FROM members WHERE guild_id = $1`, [guildId]),
@@ -681,11 +708,11 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 }
                 const requestedGuildId = url.searchParams.get("guild") || null;
                 const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
-                let selectedGuildId = requestedGuildId && manageableGuilds.some(g => g.guildId === requestedGuildId)
-                    ? requestedGuildId
-                    : null;
-                if (!selectedGuildId && manageableGuilds.length === 1) selectedGuildId = manageableGuilds[0].guildId;
-                if (!selectedGuildId && manageableGuilds.length > 1) selectedGuildId = manageableGuilds[0].guildId;
+                const userDataGuilds = await getUserDataGuilds(db, client, session.discordId);
+                const validGuildIds = new Set([...manageableGuilds, ...userDataGuilds].map(g => g.guildId));
+                let selectedGuildId = requestedGuildId && validGuildIds.has(requestedGuildId) ? requestedGuildId : null;
+                if (!selectedGuildId && userDataGuilds.length > 0) selectedGuildId = userDataGuilds[0].guildId;
+                if (!selectedGuildId && manageableGuilds.length > 0) selectedGuildId = manageableGuilds[0].guildId;
                 const data = await getUserDashboardData(db, client, session.discordId, selectedGuildId);
                 data.manageableGuildCount = manageableGuilds.length;
                 data.primaryManageGuildHref = manageableGuilds.length === 1 ? `/g/${encodeURIComponent(manageableGuilds[0].guildId)}` : null;
@@ -712,9 +739,11 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 }
                 const preferredGuildId = url.searchParams.get("guild") || null;
                 const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
-                const guildId = preferredGuildId && manageableGuilds.some(g => g.guildId === preferredGuildId)
+                const userDataGuilds = await getUserDataGuilds(db, client, session.discordId);
+                const validGuildIds = new Set([...manageableGuilds, ...userDataGuilds].map(g => g.guildId));
+                const guildId = preferredGuildId && validGuildIds.has(preferredGuildId)
                     ? preferredGuildId
-                    : (manageableGuilds[0]?.guildId || null);
+                    : (userDataGuilds[0]?.guildId || manageableGuilds[0]?.guildId || null);
                 const orderUrl = await getDiscordOrderChannelUrl(db, guildId);
                 if (orderUrl) {
                     sendRedirect(res, orderUrl);

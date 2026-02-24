@@ -47,6 +47,16 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     new SlashCommandBuilder()
+        .setName("deletedataserver")
+        .setDescription("MAIN SERVER OWNER TOOL: delete member/purchase data for a guild")
+        .addStringOption(o =>
+            o.setName("guild_id")
+                .setDescription("Target guild ID to wipe member/purchase rows for")
+                .setRequired(true)
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
         .setName("postorder")
         .setDescription("Post the order embed + buttons in the saved order channel")
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),

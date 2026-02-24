@@ -258,6 +258,17 @@ async function countSettings() {
     return toInt(res.rows[0]?.c);
 }
 
+async function deleteGuildData(guildId) {
+    const [purchasesRes, membersRes] = await Promise.all([
+        db.query(`DELETE FROM purchases WHERE guild_id = $1`, [guildId]),
+        db.query(`DELETE FROM members WHERE guild_id = $1`, [guildId]),
+    ]);
+    return {
+        deletedPurchases: purchasesRes.rowCount || 0,
+        deletedMembers: membersRes.rowCount || 0,
+    };
+}
+
 const BUYER_TIERS = [
     { name: "Common", minGold: 0, color: 0x95a5a6 },
     { name: "Rare", minGold: 10_000_000, color: 0x3498db },
@@ -1192,6 +1203,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         `Purchases rows: **${p}**\n` +
                         `Current guild price: **${guildPrice ? guildPrice.usd_per_1m : "none"}**\n` +
                         `Latest price row: **${latestPrice ? `${latestPrice.usd_per_1m} (guild ${latestPrice.guild_id})` : "none"}**`,
+                });
+            }
+
+            if (commandName === "deletedataserver") {
+                if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
+                if (!interaction.inGuild() || interaction.guildId !== process.env.GUILD_ID) {
+                    return interaction.reply({ content: "ERROR: This command can only be used in the main server.", ephemeral: true });
+                }
+                const targetGuildId = String(interaction.options.getString("guild_id", true)).trim();
+                if (!/^\d{10,25}$/.test(targetGuildId)) {
+                    return interaction.reply({ content: "ERROR: Invalid guild_id.", ephemeral: true });
+                }
+                if (targetGuildId === process.env.GUILD_ID) {
+                    return interaction.reply({ content: "ERROR: Refusing to delete main server data with this command.", ephemeral: true });
+                }
+                await interaction.deferReply({ ephemeral: true });
+                const result = await deleteGuildData(targetGuildId);
+                return interaction.editReply({
+                    content:
+                        `OK: Deleted guild-scoped data for \`${targetGuildId}\`\n` +
+                        `Members deleted: **${result.deletedMembers}**\n` +
+                        `Purchases deleted: **${result.deletedPurchases}**`,
                 });
             }
 

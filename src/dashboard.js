@@ -158,18 +158,23 @@ async function fetchDiscordUser(accessToken) {
     return resp.json();
 }
 
-async function getUserDashboardData(db, client, discordId) {
+async function getUserDashboardData(db, client, discordId, selectedGuildId = null) {
+    const guildId = selectedGuildId || process.env.GUILD_ID || null;
     const [memberRes, purchasesRes, totalSpentRes] = await Promise.all([
-        db.query(`SELECT balance_gold, updated_at FROM members WHERE discord_id = $1`, [discordId]),
+        guildId
+            ? db.query(`SELECT balance_gold, updated_at FROM members WHERE guild_id = $1 AND discord_id = $2`, [guildId, discordId])
+            : db.query(`SELECT balance_gold, updated_at FROM members WHERE discord_id = $1`, [discordId]),
         db.query(
             `SELECT kind, details, gold_cost, balance_after, created_at
              FROM purchases
-             WHERE discord_id = $1
+             WHERE ${guildId ? "guild_id = $1 AND discord_id = $2" : "discord_id = $1"}
              ORDER BY id DESC
              LIMIT 25`,
-            [discordId]
+            guildId ? [guildId, discordId] : [discordId]
         ),
-        db.query(`SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE discord_id = $1`, [discordId]),
+        guildId
+            ? db.query(`SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE guild_id = $1 AND discord_id = $2`, [guildId, discordId])
+            : db.query(`SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE discord_id = $1`, [discordId]),
     ]);
 
     let user = client?.users?.cache?.get(discordId) || null;
@@ -177,7 +182,6 @@ async function getUserDashboardData(db, client, discordId) {
 
     let guildRole = null;
     let guildIconUrl = null;
-    const guildId = process.env.GUILD_ID;
     if (guildId && client?.guilds) {
         const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
         if (guild?.iconURL) {
@@ -199,6 +203,7 @@ async function getUserDashboardData(db, client, discordId) {
 
     return {
         discordId,
+        selectedGuildId: guildId,
         isAdmin: isAdminDiscordId(discordId),
         username: user?.username || null,
         avatarUrl: user?.displayAvatarURL ? user.displayAvatarURL({ extension: "png", size: 128 }) : null,
@@ -301,8 +306,8 @@ async function getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId
     };
 }
 
-async function getDiscordOrderChannelUrl(db) {
-    const guildId = process.env.GUILD_ID;
+async function getDiscordOrderChannelUrl(db, preferredGuildId = null) {
+    const guildId = preferredGuildId || process.env.GUILD_ID;
     let row = null;
     if (guildId) {
         const res = await db.query(`SELECT guild_id, order_channel_id FROM settings WHERE guild_id = $1`, [guildId]);
@@ -370,6 +375,7 @@ function renderUserDashboardHtml(data) {
         bg2: "#10161f",
     };
     const faviconUrl = getDashboardLogoUrl(data.guildIconUrl || data.avatarUrl);
+    const orderHref = data.selectedGuildId ? `/me/order?guild=${encodeURIComponent(data.selectedGuildId)}` : "/me/order";
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>
 body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
@@ -411,7 +417,7 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 <section class="panel">
   <h2 style="margin:0 0 10px">Actions</h2>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a href="/me/order" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#1e2816;border:1px solid #304224;color:#e6edf3;text-decoration:none">Order Gold / Boost</a>
+    <a href="${escapeHtml(orderHref)}" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#1e2816;border:1px solid #304224;color:#e6edf3;text-decoration:none">Order Gold / Boost</a>
   </div>
 </section>
 <section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
@@ -673,7 +679,16 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     sendRedirect(res, "/login?next=%2Fme");
                     return;
                 }
-                const data = await getUserDashboardData(db, client, session.discordId);
+                const requestedGuildId = url.searchParams.get("guild") || null;
+                const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
+                let selectedGuildId = requestedGuildId && manageableGuilds.some(g => g.guildId === requestedGuildId)
+                    ? requestedGuildId
+                    : null;
+                if (!selectedGuildId && manageableGuilds.length === 1) selectedGuildId = manageableGuilds[0].guildId;
+                if (!selectedGuildId && manageableGuilds.length > 1) selectedGuildId = manageableGuilds[0].guildId;
+                const data = await getUserDashboardData(db, client, session.discordId, selectedGuildId);
+                data.manageableGuildCount = manageableGuilds.length;
+                data.primaryManageGuildHref = manageableGuilds.length === 1 ? `/g/${encodeURIComponent(manageableGuilds[0].guildId)}` : null;
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
                 res.end(renderUserDashboardHtml(data));
                 return;
@@ -695,7 +710,12 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
                     return;
                 }
-                const orderUrl = await getDiscordOrderChannelUrl(db);
+                const preferredGuildId = url.searchParams.get("guild") || null;
+                const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
+                const guildId = preferredGuildId && manageableGuilds.some(g => g.guildId === preferredGuildId)
+                    ? preferredGuildId
+                    : (manageableGuilds[0]?.guildId || null);
+                const orderUrl = await getDiscordOrderChannelUrl(db, guildId);
                 if (orderUrl) {
                     sendRedirect(res, orderUrl);
                     return;

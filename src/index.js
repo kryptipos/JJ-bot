@@ -282,10 +282,25 @@ function nowISO() {
 }
 
 function isManager(interaction) {
-    return (
-        interaction.member?.permissions?.has(PermissionsBitField.Flags.Administrator) ||
-        interaction.member?.permissions?.has(PermissionsBitField.Flags.ManageGuild)
-    );
+    const perms = interaction.memberPermissions || interaction.member?.permissions;
+    if (!perms) return false;
+
+    if (typeof perms.has === "function") {
+        return (
+            perms.has(PermissionsBitField.Flags.Administrator) ||
+            perms.has(PermissionsBitField.Flags.ManageGuild)
+        );
+    }
+
+    try {
+        const bitfield = new PermissionsBitField(perms);
+        return (
+            bitfield.has(PermissionsBitField.Flags.Administrator) ||
+            bitfield.has(PermissionsBitField.Flags.ManageGuild)
+        );
+    } catch {
+        return false;
+    }
 }
 
 function getAdminRoleOverwrites(guild) {

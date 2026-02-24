@@ -445,6 +445,10 @@ function renderScopedDashboardHtml(data) {
     return html
         .replace("Balance Bot Dashboard", `${escapeHtml(data.guildName || "Guild")} Dashboard`)
         .replace("Web view for balances, purchases, and price status.", `Guild dashboard for ${escapeHtml(data.guildName || "this server")}.`)
+        .replace(
+            /<div class="pill">([\s\S]*?)<\/div><\/div>/,
+            `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><a href="/guilds" style="color:#68a3ff;text-decoration:none">My Servers</a><a href="/me" style="color:#68a3ff;text-decoration:none">My Dashboard</a><a href="/logout" style="color:#68a3ff;text-decoration:none">Logout</a><div class="pill">$1</div></div></div>`
+        )
         .replace('<div class="links"><a href="/api/overview"', `<div class="links"><a href="/guilds">Back to My Servers</a> · <a href="/api/g/${encodeURIComponent(data.guildId)}/overview"`);
 }
 
@@ -549,18 +553,18 @@ async function getDashboardData(db, nowISO, getLatestPrice, client) {
 }
 
 function renderDashboardHtml(data) {
-    const distinctPriceCount = new Set((data.pricesByGuild || []).map((p) => String(p.usd_per_1m))).size;
-    const hasMultipleGuildPrices = (data.pricesByGuild || []).length > 1;
+    const allPrices = data.pricesByGuild || [];
+    const distinctPriceCount = new Set(allPrices.map((p) => String(p.usd_per_1m))).size;
+    const hasMultipleGuildPrices = allPrices.length > 1;
     const showMixedPrices = hasMultipleGuildPrices && distinctPriceCount > 1;
-    const priceText = showMixedPrices
-        ? "Per-guild prices"
-        : data.latestPrice
-            ? `${data.latestPrice.usd_per_1m} USD / 1M`
-            : "Not set";
+    const mainGuildId = process.env.GUILD_ID ? String(process.env.GUILD_ID) : null;
+    const mainGuildPrice = mainGuildId ? allPrices.find((p) => String(p.guild_id) === mainGuildId) : null;
+    const primaryPrice = mainGuildPrice || data.latestPrice || null;
+    const priceText = primaryPrice ? `${primaryPrice.usd_per_1m} USD / 1M` : "Not set";
     const priceSubtext = showMixedPrices
-        ? `${(data.pricesByGuild || []).length} guild price rows`
-        : data.latestPrice
-            ? formatTimestamp(data.latestPrice.updated_at)
+        ? `Main guild price · ${allPrices.length} guild price rows`
+        : primaryPrice
+            ? formatTimestamp(primaryPrice.updated_at)
             : "No price set";
     const topRows = data.topMembers.map((m, i) => `
       <tr><td>${i + 1}</td><td>${escapeHtml(m.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(m.discord_id))}</code></small></td><td>${escapeHtml(formatGold(m.balance_gold))}</td><td><small>${formatTimestamp(m.updated_at)}</small></td></tr>`).join("");
@@ -585,7 +589,7 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--li
 <div class="card"><div class="k">Members</div><div class="v">${data.memberCount}</div><div class="sub">Tracked users</div></div>
 <div class="card"><div class="k">Purchases</div><div class="v">${data.purchaseCount}</div><div class="sub">Recorded purchases</div></div>
 <div class="card"><div class="k">Guild Settings</div><div class="v">${data.settingsCount}</div><div class="sub">Configured guild rows</div></div>
-<div class="card"><div class="k">${showMixedPrices ? "Prices" : "Latest Price"}</div><div class="v" style="font-size:18px">${escapeHtml(priceText)}</div><div class="sub">${escapeHtml(priceSubtext)}</div></div>
+<div class="card"><div class="k">${showMixedPrices ? "Main Guild Price" : "Latest Price"}</div><div class="v" style="font-size:18px">${escapeHtml(priceText)}</div><div class="sub">${escapeHtml(priceSubtext)}</div></div>
 </div>
 <div class="split">
 <section class="panel"><h2>Top Balances</h2><table><thead><tr><th>#</th><th>User</th><th>Balance</th><th>Updated</th></tr></thead><tbody>${topRows || '<tr><td colspan="4">No member records.</td></tr>'}</tbody></table><div class="links"><a href="/api/overview" target="_blank" rel="noreferrer">Open JSON API</a></div></section>

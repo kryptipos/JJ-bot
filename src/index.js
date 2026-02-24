@@ -1048,8 +1048,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!isManager(interaction)) {
                     return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
                 }
+                if (!interaction.inGuild() || !interaction.guildId) {
+                    return interaction.reply({ content: "ERROR: /setup can only be used inside a server.", ephemeral: true });
+                }
 
                 await interaction.deferReply({ ephemeral: true });
+                const guild = interaction.guild || await client.guilds.fetch(interaction.guildId).catch(() => null);
+                if (!guild) {
+                    return interaction.editReply({ content: "ERROR: Could not resolve this server. Try again in a normal text channel." });
+                }
 
                 const existing = await getSettings(interaction.guildId);
                 const orderOpt = interaction.options.getChannel("order_channel", false);
@@ -1097,9 +1104,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     archiveCategoryId
                 );
 
-                const orderChannel = await interaction.guild.channels.fetch(orderChannelId).catch(() => null);
-                const goldPriceChannel = await interaction.guild.channels.fetch(goldPriceChannelId).catch(() => null);
-                const archiveCategory = await interaction.guild.channels.fetch(archiveCategoryId).catch(() => null);
+                const orderChannel = await guild.channels.fetch(orderChannelId).catch(() => null);
+                const goldPriceChannel = await guild.channels.fetch(goldPriceChannelId).catch(() => null);
+                const archiveCategory = await guild.channels.fetch(archiveCategoryId).catch(() => null);
                 if (!orderChannel || orderChannel.type !== ChannelType.GuildText) {
                     return interaction.editReply({ content: "ERROR: Saved order channel is unavailable. Re-run /setup with order_channel." });
                 }

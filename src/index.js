@@ -74,15 +74,18 @@ CREATE TABLE IF NOT EXISTS prices (
 
     await db.query(`
 CREATE TABLE IF NOT EXISTS members (
-  discord_id TEXT PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  discord_id TEXT NOT NULL,
   balance_gold BIGINT NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(guild_id, discord_id)
 );
 `);
 
     await db.query(`
 CREATE TABLE IF NOT EXISTS purchases (
   id BIGSERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
   discord_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   details TEXT NOT NULL,

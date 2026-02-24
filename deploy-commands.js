@@ -116,21 +116,14 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 ].map(c => c.toJSON());
 
-const guildCommands = commands.filter((c) => c.name !== "me");
-const dmCommands = commands.filter((c) => c.name === "me");
-
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
     try {
-        console.log("... Registering guild commands...");
-        await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body: guildCommands }
-        );
+        console.log("... Registering global commands...");
         await rest.put(
             Routes.applicationCommands(process.env.CLIENT_ID),
-            { body: dmCommands }
+            { body: commands }
         );
         console.log("OK: Commands registered!");
     } catch (err) {

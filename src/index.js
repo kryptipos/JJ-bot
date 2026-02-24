@@ -1053,10 +1053,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 await interaction.deferReply({ ephemeral: true });
-                const guild = interaction.guild || await client.guilds.fetch(interaction.guildId).catch(() => null);
-                if (!guild) {
-                    return interaction.editReply({ content: "ERROR: Could not resolve this server. Try again in a normal text channel." });
-                }
 
                 const existing = await getSettings(interaction.guildId);
                 const orderOpt = interaction.options.getChannel("order_channel", false);
@@ -1104,9 +1100,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     archiveCategoryId
                 );
 
-                const orderChannel = await guild.channels.fetch(orderChannelId).catch(() => null);
-                const goldPriceChannel = await guild.channels.fetch(goldPriceChannelId).catch(() => null);
-                const archiveCategory = await guild.channels.fetch(archiveCategoryId).catch(() => null);
+                const orderChannel = await client.channels.fetch(orderChannelId).catch(() => null);
+                const goldPriceChannel = await client.channels.fetch(goldPriceChannelId).catch(() => null);
+                const archiveCategory = await client.channels.fetch(archiveCategoryId).catch(() => null);
                 if (!orderChannel || orderChannel.type !== ChannelType.GuildText) {
                     return interaction.editReply({ content: "ERROR: Saved order channel is unavailable. Re-run /setup with order_channel." });
                 }

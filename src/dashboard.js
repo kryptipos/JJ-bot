@@ -104,6 +104,18 @@ function isAdminDiscordId(discordId) {
     return getAdminIdSet().has(String(discordId));
 }
 
+function hasManageGuildPermission(member) {
+    if (!member) return false;
+    try {
+        if (member.permissions?.has?.("Administrator") || member.permissions?.has?.("ManageGuild")) return true;
+    } catch {}
+    try {
+        const perms = member.permissions;
+        if (perms?.has?.(8n) || perms?.has?.(0x20n)) return true;
+    } catch {}
+    return false;
+}
+
 function buildDiscordOAuthUrl(state) {
     const { clientId, baseUrl } = getOAuthConfig();
     const redirectUri = `${baseUrl.replace(/\/$/, "")}/auth/callback`;
@@ -209,6 +221,86 @@ async function getUserDashboardData(db, client, discordId) {
     };
 }
 
+async function getManageableGuilds(db, client, discordId) {
+    const guildIds = new Set();
+    for (const table of ["settings", "members", "purchases"]) {
+        const col = "guild_id";
+        const res = await db.query(`SELECT DISTINCT ${col} FROM ${table} WHERE ${col} IS NOT NULL`);
+        for (const row of res.rows) guildIds.add(String(row.guild_id));
+    }
+
+    const out = [];
+    for (const guildId of guildIds) {
+        const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId).catch(() => null);
+        if (!guild) continue;
+        const member = await guild.members.fetch({ user: discordId, force: true }).catch(() => null);
+        if (!hasManageGuildPermission(member)) continue;
+        out.push({
+            guildId,
+            name: guild.name || `Guild ${guildId}`,
+            iconUrl: guild.iconURL ? guild.iconURL({ extension: "png", size: 128 }) : null,
+        });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+}
+
+async function getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId) {
+    const [memberCountRes, purchaseCountRes, settingsRes, topMembersRes, recentPurchasesRes, latestPrice] = await Promise.all([
+        db.query(`SELECT COUNT(*) AS c FROM members WHERE guild_id = $1`, [guildId]),
+        db.query(`SELECT COUNT(*) AS c FROM purchases WHERE guild_id = $1`, [guildId]),
+        db.query(`SELECT * FROM settings WHERE guild_id = $1`, [guildId]),
+        db.query(
+            `SELECT discord_id, balance_gold, updated_at
+             FROM members
+             WHERE guild_id = $1
+             ORDER BY balance_gold DESC, updated_at DESC
+             LIMIT 25`,
+            [guildId]
+        ),
+        db.query(
+            `SELECT discord_id, kind, details, gold_cost, balance_after, created_at
+             FROM purchases
+             WHERE guild_id = $1
+             ORDER BY id DESC
+             LIMIT 15`,
+            [guildId]
+        ),
+        db.query(`SELECT * FROM prices WHERE guild_id = $1`, [guildId]).then(r => r.rows[0] || null).catch(async () => getLatestPrice()),
+    ]);
+
+    const allIds = [...topMembersRes.rows.map(r => r.discord_id), ...recentPurchasesRes.rows.map(r => r.discord_id)];
+    const userLabels = await resolveUserLabels(client, allIds);
+    const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId).catch(() => null);
+    const guildIconUrl = guild?.iconURL ? guild.iconURL({ extension: "png", size: 128 }) : null;
+
+    return {
+        generatedAt: nowISO(),
+        guildId,
+        guildName: guild?.name || `Guild ${guildId}`,
+        guildIconUrl,
+        memberCount: toInt(memberCountRes.rows[0]?.c),
+        purchaseCount: toInt(purchaseCountRes.rows[0]?.c),
+        settingsCount: settingsRes.rows.length,
+        latestPrice,
+        topMembers: topMembersRes.rows.map((r) => ({
+            discord_id: r.discord_id,
+            user_label: userLabels.get(String(r.discord_id)) || null,
+            balance_gold: toInt(r.balance_gold),
+            updated_at: r.updated_at,
+        })),
+        recentPurchases: recentPurchasesRes.rows.map((r) => ({
+            discord_id: r.discord_id,
+            user_label: userLabels.get(String(r.discord_id)) || null,
+            kind: r.kind,
+            details: r.details,
+            gold_cost: toInt(r.gold_cost),
+            balance_after: toInt(r.balance_after),
+            created_at: r.created_at,
+        })),
+    };
+}
+
 async function getDiscordOrderChannelUrl(db) {
     const guildId = process.env.GUILD_ID;
     let row = null;
@@ -234,9 +326,12 @@ function renderUserDashboardHtml(data) {
     const rows = data.purchases.map((p) => `
       <tr><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 40))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td>${formatTimestamp(p.created_at)}</td></tr>`).join("");
     const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
-    const adminLink = data.isAdmin
-        ? `<div style="margin-top:10px"><a href="/admin" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#1a2433;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Go to Admin Dashboard</a></div>`
-        : "";
+    const adminLink = [
+        data.isAdmin
+            ? `<a href="/admin" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#1a2433;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Go to Admin Dashboard</a>`
+            : "",
+        `<a href="/guilds" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#131d2b;border:1px solid #2a3340;color:#e6edf3;text-decoration:none;margin-left:${data.isAdmin ? "8px" : "0"}">Manage My Servers</a>`,
+    ].filter(Boolean).join("");
     const tierColor = ({
         Legendary: "#f39c12",
         Epic: "#9b59b6",
@@ -296,7 +391,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 @media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
-<div class="top"><div class="hero">${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="server logo"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1>${adminLink}</div></div><div><a href="/logout">Logout</a></div></div>
+<div class="top"><div class="hero">${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="server logo"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1><div style="margin-top:10px">${adminLink}</div></div></div><div><a href="/logout">Logout</a></div></div>
 <section class="member-card">
   <div class="member-card-grid">
     <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>
@@ -322,6 +417,35 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 <section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
 <table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No purchases yet.</td></tr>'}</tbody></table>
 </section></div></body></html>`;
+}
+
+function renderGuildsHtml({ user, guilds }) {
+    const rows = guilds.map((g) => `
+      <a href="/g/${encodeURIComponent(g.guildId)}" style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a3340;border-radius:12px;background:#141a22;color:#e6edf3;text-decoration:none">
+        ${g.iconUrl ? `<img src="${escapeHtml(g.iconUrl)}" alt="" style="width:36px;height:36px;border-radius:50%;border:1px solid #2a3340"/>` : `<div style="width:36px;height:36px;border-radius:50%;background:#1d2633;border:1px solid #2a3340"></div>`}
+        <div style="flex:1"><div style="font-weight:700">${escapeHtml(g.name)}</div><div style="color:#9fb0c3;font-size:12px"><code>${escapeHtml(shortDiscordId(g.guildId))}</code></div></div>
+        <div style="color:#68a3ff">Open</div>
+      </a>`).join("");
+    const faviconUrl = getDashboardLogoUrl();
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Manage My Servers</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
+<style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:900px;margin:0 auto;padding:20px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px}.muted{color:#9fb0c3}.grid{display:grid;gap:10px;margin-top:10px}a{color:#68a3ff;text-decoration:none}</style></head>
+<body><div class="wrap"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><h1 style="margin:0">Manage My Servers</h1><div class="muted">${escapeHtml(user?.username || "Discord User")}</div></div><div><a href="/me">My Dashboard</a> · <a href="/logout">Logout</a></div></div>
+<section class="panel" style="margin-top:14px"><p class="muted" style="margin-top:0">Servers where you have admin/manage permissions and JJbot has data/config.</p><div class="grid">${rows || '<div class="muted">No manageable servers found yet.</div>'}</div></section></div></body></html>`;
+}
+
+function renderGuildAccessDeniedHtml() {
+    const faviconUrl = getDashboardLogoUrl();
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Access Denied</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
+<style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:720px;margin:80px auto;padding:20px}.card{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:18px}a{color:#68a3ff;text-decoration:none}</style></head>
+<body><div class="wrap"><div class="card"><h1 style="margin-top:0">Guild Access Denied</h1><p>You are logged in, but you do not have admin access to this guild dashboard.</p><p><a href="/guilds">Manage My Servers</a> · <a href="/me">My Dashboard</a></p></div></div></body></html>`;
+}
+
+function renderScopedDashboardHtml(data) {
+    const html = renderDashboardHtml(data);
+    return html
+        .replace("Balance Bot Dashboard", `${escapeHtml(data.guildName || "Guild")} Dashboard`)
+        .replace("Web view for balances, purchases, and price status.", `Guild dashboard for ${escapeHtml(data.guildName || "this server")}.`)
+        .replace('<div class="links"><a href="/api/overview"', `<div class="links"><a href="/guilds">Back to My Servers</a> · <a href="/api/g/${encodeURIComponent(data.guildId)}/overview"`);
 }
 
 function renderAccessDeniedHtml() {
@@ -525,6 +649,17 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 return;
             }
 
+            if (url.pathname === "/guilds") {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login?next=%2Fguilds");
+                    return;
+                }
+                const guilds = await getManageableGuilds(db, client, session.discordId);
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderGuildsHtml({ user: session, guilds }));
+                return;
+            }
+
             if (url.pathname === "/me/order") {
                 if (!session?.discordId) {
                     sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
@@ -563,6 +698,29 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 return;
             }
 
+            if (url.pathname.startsWith("/g/")) {
+                if (!session?.discordId) {
+                    sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
+                    return;
+                }
+                const guildId = decodeURIComponent(url.pathname.slice(3)).trim();
+                if (!guildId) {
+                    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+                    res.end("Not found");
+                    return;
+                }
+                const guilds = await getManageableGuilds(db, client, session.discordId);
+                if (!guilds.some((g) => g.guildId === guildId) && !isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+                    res.end(renderGuildAccessDeniedHtml());
+                    return;
+                }
+                const data = await getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId);
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderScopedDashboardHtml(data));
+                return;
+            }
+
             if (url.pathname === "/") {
                 if (!session?.discordId) {
                     sendRedirect(res, "/login");
@@ -588,6 +746,24 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     res.end(JSON.stringify({ error: "forbidden" }));
                     return;
                 }
+                res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+                res.end(JSON.stringify(data));
+                return;
+            }
+
+            if (url.pathname.startsWith("/api/g/") && url.pathname.endsWith("/overview")) {
+                if (!session?.discordId) {
+                    sendRedirect(res, "/login");
+                    return;
+                }
+                const guildId = decodeURIComponent(url.pathname.slice("/api/g/".length, -"/overview".length)).trim();
+                const guilds = await getManageableGuilds(db, client, session.discordId);
+                if (!guilds.some((g) => g.guildId === guildId) && !isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+                    res.end(JSON.stringify({ error: "forbidden" }));
+                    return;
+                }
+                const data = await getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId);
                 res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
                 res.end(JSON.stringify(data));
                 return;

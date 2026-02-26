@@ -828,11 +828,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     sendRedirect(res, "/login?next=%2Fdashboard");
                     return;
                 }
-                if (isAdminDiscordId(session.discordId)) {
-                    sendRedirect(res, "/admin");
-                } else {
-                    sendRedirect(res, "/dashboard");
-                }
+                sendRedirect(res, "/dashboard");
                 return;
             }
 

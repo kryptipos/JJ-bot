@@ -758,15 +758,17 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     const oauthGuilds = await fetchDiscordUserGuilds(session.accessToken);
                     guilds = (Array.isArray(oauthGuilds) ? oauthGuilds : []).map((g) => {
                         const guildId = String(g.id);
+                        const botGuild = client?.guilds?.cache?.get(guildId);
+                        if (!botGuild) return null;
                         const canManage = hasManageGuildPermissionBits(g.permissions, Boolean(g.owner));
                         return {
                             guildId,
-                            name: g.name || `Guild ${guildId}`,
-                            iconUrl: g.icon ? `https://cdn.discordapp.com/icons/${guildId}/${g.icon}.png?size=128` : null,
+                            name: botGuild.name || g.name || `Guild ${guildId}`,
+                            iconUrl: botGuild.iconURL ? botGuild.iconURL({ extension: "png", size: 128 }) : (g.icon ? `https://cdn.discordapp.com/icons/${guildId}/${g.icon}.png?size=128` : null),
                             canManage,
                             href: canManage ? `/g/${encodeURIComponent(guildId)}` : `/me?guild=${encodeURIComponent(guildId)}`,
                         };
-                    }).sort((a, b) => a.name.localeCompare(b.name));
+                    }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
                 } catch {
                     const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
                     guilds = manageableGuilds.map((g) => ({

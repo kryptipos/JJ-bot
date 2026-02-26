@@ -116,6 +116,16 @@ function hasManageGuildPermission(member) {
     return false;
 }
 
+function hasManageGuildPermissionBits(rawPermissions, isOwner = false) {
+    if (isOwner) return true;
+    try {
+        const perms = BigInt(String(rawPermissions || "0"));
+        return Boolean((perms & 0x8n) === 0x8n || (perms & 0x20n) === 0x20n);
+    } catch {
+        return false;
+    }
+}
+
 function buildDiscordOAuthUrl(state) {
     const { clientId, baseUrl } = getOAuthConfig();
     const redirectUri = `${baseUrl.replace(/\/$/, "")}/auth/callback`;
@@ -123,7 +133,7 @@ function buildDiscordOAuthUrl(state) {
         client_id: clientId,
         response_type: "code",
         redirect_uri: redirectUri,
-        scope: "identify",
+        scope: "identify guilds",
         prompt: "none",
         state,
     });
@@ -155,6 +165,14 @@ async function fetchDiscordUser(accessToken) {
         headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!resp.ok) throw new Error(`oauth_user_${resp.status}`);
+    return resp.json();
+}
+
+async function fetchDiscordUserGuilds(accessToken) {
+    const resp = await fetch("https://discord.com/api/users/@me/guilds", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!resp.ok) throw new Error(`oauth_guilds_${resp.status}`);
     return resp.json();
 }
 
@@ -454,16 +472,16 @@ a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
 
 function renderGuildsHtml({ user, guilds }) {
     const rows = guilds.map((g) => `
-      <a href="/g/${encodeURIComponent(g.guildId)}" style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a3340;border-radius:12px;background:#141a22;color:#e6edf3;text-decoration:none">
+      <a href="${escapeHtml(g.href || `/g/${encodeURIComponent(g.guildId)}`)}" style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #2a3340;border-radius:12px;background:#141a22;color:#e6edf3;text-decoration:none">
         ${g.iconUrl ? `<img src="${escapeHtml(g.iconUrl)}" alt="" style="width:36px;height:36px;border-radius:50%;border:1px solid #2a3340"/>` : `<div style="width:36px;height:36px;border-radius:50%;background:#1d2633;border:1px solid #2a3340"></div>`}
-        <div style="flex:1"><div style="font-weight:700">${escapeHtml(g.name)}</div><div style="color:#9fb0c3;font-size:12px"><code>${escapeHtml(shortDiscordId(g.guildId))}</code></div></div>
+        <div style="flex:1"><div style="font-weight:700">${escapeHtml(g.name)}</div><div style="color:#9fb0c3;font-size:12px"><code>${escapeHtml(shortDiscordId(g.guildId))}</code>${g.canManage ? " · Admin Dashboard" : " · Member Dashboard"}</div></div>
         <div style="color:#68a3ff">Open</div>
       </a>`).join("");
     const faviconUrl = getDashboardLogoUrl();
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Manage My Servers</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:900px;margin:0 auto;padding:20px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px}.muted{color:#9fb0c3}.grid{display:grid;gap:10px;margin-top:10px}a{color:#68a3ff;text-decoration:none}</style></head>
-<body><div class="wrap"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><h1 style="margin:0">Manage My Servers</h1><div class="muted">${escapeHtml(user?.username || "Discord User")}</div></div><div><a href="/me">My Dashboard</a> · <a href="/logout">Logout</a></div></div>
-<section class="panel" style="margin-top:14px"><p class="muted" style="margin-top:0">Servers where you have admin/manage permissions and JJbot has data/config.</p><div class="grid">${rows || '<div class="muted">No manageable servers found yet.</div>'}</div></section></div></body></html>`;
+<body><div class="wrap"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><h1 style="margin:0">Manage My Servers</h1><div class="muted">${escapeHtml(user?.username || "Discord User")}</div></div><div><a href="/logout">Logout</a></div></div>
+<section class="panel" style="margin-top:14px"><p class="muted" style="margin-top:0">All Discord servers in your account. Admin/manage servers open the admin dashboard; others open your member dashboard.</p><div class="grid">${rows || '<div class="muted">No servers found for this Discord account.</div>'}</div></section></div></body></html>`;
 }
 
 function renderGuildAccessDeniedHtml() {
@@ -685,6 +703,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 sessions.set(newSessionId, {
                     discordId: String(user.id),
                     username: user.username || null,
+                    accessToken: token.access_token,
                     createdAt: Date.now(),
                 });
                 sendRedirect(
@@ -710,6 +729,14 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
                 const userDataGuilds = await getUserDataGuilds(db, client, session.discordId);
                 const validGuildIds = new Set([...manageableGuilds, ...userDataGuilds].map(g => g.guildId));
+                if (session.accessToken) {
+                    try {
+                        const oauthGuilds = await fetchDiscordUserGuilds(session.accessToken);
+                        for (const g of Array.isArray(oauthGuilds) ? oauthGuilds : []) {
+                            if (g?.id) validGuildIds.add(String(g.id));
+                        }
+                    } catch {}
+                }
                 let selectedGuildId = requestedGuildId && validGuildIds.has(requestedGuildId) ? requestedGuildId : null;
                 if (!selectedGuildId && userDataGuilds.length > 0) selectedGuildId = userDataGuilds[0].guildId;
                 if (!selectedGuildId && manageableGuilds.length > 0) selectedGuildId = manageableGuilds[0].guildId;
@@ -726,7 +753,28 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     sendRedirect(res, "/login?next=%2Fdashboard");
                     return;
                 }
-                const guilds = await getManageableGuilds(db, client, session.discordId);
+                let guilds = [];
+                try {
+                    const oauthGuilds = await fetchDiscordUserGuilds(session.accessToken);
+                    guilds = (Array.isArray(oauthGuilds) ? oauthGuilds : []).map((g) => {
+                        const guildId = String(g.id);
+                        const canManage = hasManageGuildPermissionBits(g.permissions, Boolean(g.owner));
+                        return {
+                            guildId,
+                            name: g.name || `Guild ${guildId}`,
+                            iconUrl: g.icon ? `https://cdn.discordapp.com/icons/${guildId}/${g.icon}.png?size=128` : null,
+                            canManage,
+                            href: canManage ? `/g/${encodeURIComponent(guildId)}` : `/me?guild=${encodeURIComponent(guildId)}`,
+                        };
+                    }).sort((a, b) => a.name.localeCompare(b.name));
+                } catch {
+                    const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
+                    guilds = manageableGuilds.map((g) => ({
+                        ...g,
+                        canManage: true,
+                        href: `/g/${encodeURIComponent(g.guildId)}`,
+                    }));
+                }
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
                 res.end(renderGuildsHtml({ user: session, guilds }));
                 return;
@@ -886,3 +934,4 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
 }
 
 module.exports = { startDashboardServer };
+

@@ -135,17 +135,31 @@ const commands = [
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+const MAIN_GUILD_ID = process.env.GUILD_ID || "";
+const INSTANT_GUILD_ID = process.env.INSTANT_GUILD_ID || "";
 
 (async () => {
     try {
-        if (process.env.GUILD_ID) {
-            console.log("... Registering main guild commands (instant refresh)...");
+        // Optional instant-refresh server for testing without affecting main/customer server command list.
+        if (INSTANT_GUILD_ID) {
+            console.log("... Registering instant guild commands...");
             await rest.put(
-                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+                Routes.applicationGuildCommands(process.env.CLIENT_ID, INSTANT_GUILD_ID),
                 { body: commands }
             );
-            console.log("OK: Main guild commands registered.");
+            console.log("OK: Instant guild commands registered.");
         }
+
+        // Keep main guild clean (no duplicates) by clearing guild-scoped commands there.
+        if (MAIN_GUILD_ID && MAIN_GUILD_ID !== INSTANT_GUILD_ID) {
+            console.log("... Clearing main guild scoped commands...");
+            await rest.put(
+                Routes.applicationGuildCommands(process.env.CLIENT_ID, MAIN_GUILD_ID),
+                { body: [] }
+            );
+            console.log("OK: Main guild scoped commands cleared.");
+        }
+
         console.log("... Registering global commands (for all customer servers)...");
         await rest.put(
             Routes.applicationCommands(process.env.CLIENT_ID),

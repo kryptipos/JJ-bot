@@ -1381,6 +1381,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 const newBalance = existing.balance_gold + amount;
                 await updateMember(guildId, newBalance, nowISO(), user.id);
+                await insertPurchase(
+                    guildId,
+                    user.id,
+                    "addbal",
+                    `Admin top-up by ${interaction.user.tag}`,
+                    amount,
+                    newBalance,
+                    nowISO()
+                );
 
                 return interaction.editReply({
                     content: `OK: Added **${formatGold(amount)}** to ${user}. New balance: **${formatGold(newBalance)}**.`,

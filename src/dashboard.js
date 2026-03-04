@@ -366,7 +366,7 @@ async function getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId
 }
 
 async function getGuildMemberDetailData(db, client, guildId, discordId) {
-    const [memberRes, purchasesRes, totalSpentRes] = await Promise.all([
+    const [memberRes, purchasesRes, totalSpentRes, totalsByKindRes, totalPurchaseOnlyRes] = await Promise.all([
         db.query(`SELECT balance_gold, updated_at FROM members WHERE guild_id = $1 AND discord_id = $2`, [guildId, discordId]),
         db.query(
             `SELECT kind, details, gold_cost, balance_after, created_at
@@ -382,6 +382,20 @@ async function getGuildMemberDetailData(db, client, guildId, discordId) {
              WHERE guild_id = $1 AND discord_id = $2 AND kind <> 'withdraw'`,
             [guildId, discordId]
         ),
+        db.query(
+            `SELECT kind, COALESCE(SUM(gold_cost), 0) AS total_gold
+             FROM purchases
+             WHERE guild_id = $1 AND discord_id = $2
+             GROUP BY kind`,
+            [guildId, discordId]
+        ),
+        db.query(
+            `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold
+             FROM purchases
+             WHERE guild_id = $1 AND discord_id = $2
+               AND kind NOT IN ('addbal', 'withdraw')`,
+            [guildId, discordId]
+        ),
     ]);
 
     const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId).catch(() => null);
@@ -392,6 +406,12 @@ async function getGuildMemberDetailData(db, client, guildId, discordId) {
 
     const totalSpentGold = toInt(totalSpentRes.rows[0]?.total_gold);
     const tierName = getTierForTotalBought(totalSpentGold);
+    const totalsByKind = new Map(
+        totalsByKindRes.rows.map((r) => [String(r.kind || "").toLowerCase(), toInt(r.total_gold)])
+    );
+    const totalAddedGold = totalsByKind.get("addbal") || 0;
+    const totalWithdrawGold = totalsByKind.get("withdraw") || 0;
+    const totalPurchaseGold = toInt(totalPurchaseOnlyRes.rows[0]?.total_gold);
 
     return {
         guildId,
@@ -403,6 +423,9 @@ async function getGuildMemberDetailData(db, client, guildId, discordId) {
         tierName,
         nextTierProgress: getNextTierProgress(totalSpentGold),
         totalSpentGold,
+        totalAddedGold,
+        totalWithdrawGold,
+        totalPurchaseGold,
         member: memberRes.rows[0]
             ? {
                   balance_gold: toInt(memberRes.rows[0].balance_gold),
@@ -611,7 +634,7 @@ function renderGuildMemberDetailHtml(data) {
       <tr>
         <td>${escapeHtml(String(p.kind || "").toUpperCase())}</td>
         <td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 60))}</td>
-        <td>-${escapeHtml(formatGold(p.gold_cost))}</td>
+        <td>${String(p.kind || "").toLowerCase() === "addbal" ? "+" : "-"}${escapeHtml(formatGold(p.gold_cost))}</td>
         <td>${escapeHtml(formatGold(p.balance_after))}</td>
         <td><small>${formatTimestamp(p.created_at)}</small></td>
       </tr>`).join("");
@@ -655,7 +678,10 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 <div class="stats">
 <div class="card"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
 <div class="card"><div class="k">Total Spent (Tier)</div><div class="v">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
-<div class="card"><div class="k">Purchases (Shown)</div><div class="v">${data.purchaseCount}</div></div>
+<div class="card"><div class="k">Total Added Gold</div><div class="v">${escapeHtml(formatGold(data.totalAddedGold || 0))}</div></div>
+<div class="card"><div class="k">Total Withdraw Gold</div><div class="v">${escapeHtml(formatGold(data.totalWithdrawGold || 0))}</div></div>
+<div class="card"><div class="k">Total Purchase Gold</div><div class="v">${escapeHtml(formatGold(data.totalPurchaseGold || 0))}</div></div>
+<div class="card"><div class="k">Activity Rows (Shown)</div><div class="v">${data.purchaseCount}</div></div>
 <div class="card"><div class="k">Last Updated</div><div class="v" style="font-size:14px">${data.member ? formatPrettyTimestamp(data.member.updated_at) : "-"}</div></div>
 </div>
 <div style="margin-top:10px;color:#9fb0c3">${escapeHtml(data.nextTierProgress)}</div>

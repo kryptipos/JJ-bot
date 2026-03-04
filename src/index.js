@@ -217,7 +217,11 @@ async function deletePurchasesForUser(guildId, discordId) {
 
 async function getTotalBought(guildId, discordId) {
     const res = await db.query(
-        `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold FROM purchases WHERE guild_id = $1 AND discord_id = $2`,
+        `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold
+         FROM purchases
+         WHERE guild_id = $1
+           AND discord_id = $2
+           AND kind <> 'withdraw'`,
         [guildId, discordId]
     );
     return { total_gold: toInt(res.rows[0]?.total_gold) };
@@ -1464,6 +1468,48 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     })());
 
                 return interaction.editReply({ embeds: [embed], components: [tipButtonRow()] });
+            }
+
+            if (commandName === "withdraw") {
+                if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
+
+                await interaction.deferReply({ ephemeral: true });
+
+                const user = interaction.options.getUser("user", true);
+                const kind = "withdraw";
+                const details = interaction.options.getString("details", true);
+                const goldAmount = interaction.options.getInteger("gold_amount", true);
+                if (goldAmount <= 0) return interaction.editReply({ content: "ERROR: gold_amount must be > 0." });
+
+                const guildId = interaction.guildId;
+                const member = await getMember(guildId, user.id);
+                if (!member) return interaction.editReply({ content: `ERROR: ${user} has no member card. Use /mc first.` });
+
+                const newBalance = member.balance_gold - goldAmount;
+                await updateMember(guildId, newBalance, nowISO(), user.id);
+                await insertPurchase(guildId, user.id, kind, details, goldAmount, newBalance, nowISO());
+
+                const totalBoughtGold = (await getTotalBought(guildId, user.id)).total_gold;
+                const tierName = getTierForTotalBought(totalBoughtGold).name;
+                const progress = getNextTierProgress(totalBoughtGold);
+
+                const embed = new EmbedBuilder()
+                    .setTitle("OK: Withdrawal Recorded")
+                    .setDescription(`${user}`)
+                    .addFields(
+                        { name: "Type", value: "WITHDRAW", inline: true },
+                        { name: "Details", value: details, inline: false },
+                        { name: "Withdrawn", value: `-${formatGold(goldAmount)} (${goldAmount.toLocaleString()})`, inline: false },
+                        { name: "Balance After", value: `**${formatGold(newBalance)}** (${newBalance.toLocaleString()})`, inline: false },
+                        { name: "Total Bought (Tier)", value: `**${formatGold(totalBoughtGold)}** (${totalBoughtGold.toLocaleString()})`, inline: false },
+                        { name: "Tier", value: `**${tierName} Tier**`, inline: true },
+                        { name: "Current Reward", value: TIER_REWARDS[tierName] || TIER_REWARDS.Common, inline: false },
+                        { name: "Next Tier", value: `**${progress.nextTierLabel}**`, inline: true },
+                        { name: "Next Reward", value: progress.nextReward, inline: false },
+                        { name: "Note", value: "Withdrawal does not contribute to tier progress.", inline: false }
+                    );
+
+                return interaction.editReply({ embeds: [embed] });
             }
 
             if (commandName === "history") {

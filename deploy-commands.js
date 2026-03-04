@@ -110,6 +110,14 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     new SlashCommandBuilder()
+        .setName("withdraw")
+        .setDescription("Record a gold withdrawal: deduct balance but do NOT add tier progress (admin)")
+        .addUserOption(o => o.setName("user").setDescription("Buyer").setRequired(true))
+        .addStringOption(o => o.setName("details").setDescription('e.g. "Cashout / transfer out"').setRequired(true))
+        .addIntegerOption(o => o.setName("gold_amount").setDescription("Gold to withdraw (1000000 = 1M)").setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+    new SlashCommandBuilder()
         .setName("history")
         .setDescription("View your last 10 purchases"),
 

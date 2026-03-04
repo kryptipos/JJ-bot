@@ -55,6 +55,20 @@ function formatGold(n) {
     return String(value);
 }
 
+function getTierForTotalBought(totalGold) {
+    if (totalGold >= 50_000_000) return "Legendary";
+    if (totalGold >= 20_000_000) return "Epic";
+    if (totalGold >= 10_000_000) return "Rare";
+    return "Common";
+}
+
+function getNextTierProgress(totalGold) {
+    if (totalGold < 10_000_000) return `Spend ${formatGold(10_000_000 - totalGold)} more to unlock Rare Tier.`;
+    if (totalGold < 20_000_000) return `Spend ${formatGold(20_000_000 - totalGold)} more to unlock Epic Tier.`;
+    if (totalGold < 50_000_000) return `Spend ${formatGold(50_000_000 - totalGold)} more to unlock Legendary Tier.`;
+    return "Highest tier already unlocked.";
+}
+
 function parseCookies(req) {
     const raw = req.headers.cookie || "";
     const out = {};
@@ -351,6 +365,62 @@ async function getGuildDashboardData(db, nowISO, getLatestPrice, client, guildId
     };
 }
 
+async function getGuildMemberDetailData(db, client, guildId, discordId) {
+    const [memberRes, purchasesRes, totalSpentRes] = await Promise.all([
+        db.query(`SELECT balance_gold, updated_at FROM members WHERE guild_id = $1 AND discord_id = $2`, [guildId, discordId]),
+        db.query(
+            `SELECT kind, details, gold_cost, balance_after, created_at
+             FROM purchases
+             WHERE guild_id = $1 AND discord_id = $2
+             ORDER BY id DESC
+             LIMIT 50`,
+            [guildId, discordId]
+        ),
+        db.query(
+            `SELECT COALESCE(SUM(gold_cost), 0) AS total_gold
+             FROM purchases
+             WHERE guild_id = $1 AND discord_id = $2 AND kind <> 'withdraw'`,
+            [guildId, discordId]
+        ),
+    ]);
+
+    const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId).catch(() => null);
+    const user = client?.users?.cache?.get(discordId) || await client?.users?.fetch?.(discordId).catch(() => null);
+    const guildMember = guild
+        ? await guild.members.fetch({ user: discordId, force: true }).catch(() => null)
+        : null;
+
+    const totalSpentGold = toInt(totalSpentRes.rows[0]?.total_gold);
+    const tierName = getTierForTotalBought(totalSpentGold);
+
+    return {
+        guildId,
+        guildName: guild?.name || `Guild ${guildId}`,
+        guildIconUrl: guild?.iconURL ? guild.iconURL({ extension: "png", size: 128 }) : null,
+        discordId,
+        username: user?.username || null,
+        avatarUrl: user?.displayAvatarURL ? user.displayAvatarURL({ extension: "png", size: 128 }) : null,
+        tierName,
+        nextTierProgress: getNextTierProgress(totalSpentGold),
+        totalSpentGold,
+        member: memberRes.rows[0]
+            ? {
+                  balance_gold: toInt(memberRes.rows[0].balance_gold),
+                  updated_at: memberRes.rows[0].updated_at,
+              }
+            : null,
+        purchaseCount: purchasesRes.rows.length,
+        purchases: purchasesRes.rows.map((r) => ({
+            kind: r.kind,
+            details: r.details,
+            gold_cost: toInt(r.gold_cost),
+            balance_after: toInt(r.balance_after),
+            created_at: r.created_at,
+        })),
+        guildRoleNames: guildMember ? guildMember.roles.cache.map((r) => String(r.name || "")).filter(Boolean) : [],
+    };
+}
+
 async function getDiscordOrderChannelUrl(db, preferredGuildId = null) {
     const guildId = preferredGuildId || process.env.GUILD_ID;
     let row = null;
@@ -534,6 +604,69 @@ function renderSimpleActionPage({ title, message, backHref = "/me", primaryLinkH
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${primaryLinkHref ? `<p><a href="${escapeHtml(primaryLinkHref)}" target="_blank" rel="noreferrer">${escapeHtml(primaryLinkLabel || "Open Discord")}</a></p>` : ""}<p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
 }
 
+function renderGuildMemberDetailHtml(data) {
+    const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
+    const rolePreview = data.guildRoleNames.length ? escapeHtml(data.guildRoleNames.slice(0, 8).join(", ")) : "No role data";
+    const rows = data.purchases.map((p) => `
+      <tr>
+        <td>${escapeHtml(String(p.kind || "").toUpperCase())}</td>
+        <td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 60))}</td>
+        <td>-${escapeHtml(formatGold(p.gold_cost))}</td>
+        <td>${escapeHtml(formatGold(p.balance_after))}</td>
+        <td><small>${formatTimestamp(p.created_at)}</small></td>
+      </tr>`).join("");
+    const tierColor = ({
+        Legendary: "#f39c12",
+        Epic: "#9b59b6",
+        Rare: "#3498db",
+        Common: "#95a5a6",
+    })[data.tierName] || "#95a5a6";
+    const faviconUrl = getDashboardLogoUrl(data.guildIconUrl || data.avatarUrl);
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Member Detail</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
+<style>
+body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}
+.wrap{max-width:1040px;margin:0 auto;padding:20px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.links a{color:#68a3ff;text-decoration:none;margin-right:10px}
+.panel{margin-top:14px;background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px}
+.hero{display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:center}
+.avatar{width:96px;height:96px;border-radius:50%;border:3px solid ${tierColor};object-fit:cover;background:#10151d}
+.tier{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};font-size:12px;font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.card{background:#10151d;border:1px solid #2a3340;border-radius:12px;padding:10px}
+.k{color:#9fb0c3;font-size:12px}.v{font-size:20px;font-weight:700;margin-top:4px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #2a3340;text-align:left;font-size:13px}th{color:#9fb0c3}
+@media (max-width:800px){.stats{grid-template-columns:1fr 1fr}.hero{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+<div class="top">
+<h1 style="margin:0;font-size:20px">Member Detail</h1>
+<div class="links"><a href="/g/${encodeURIComponent(data.guildId)}">Back to Guild Dashboard</a><a href="/guilds">My Servers</a><a href="/logout">Logout</a></div>
+</div>
+<section class="panel">
+<div class="hero">
+<div>${data.avatarUrl ? `<img class="avatar" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar"></div>`}</div>
+<div>
+<div class="tier">${escapeHtml(data.tierName)} Tier</div>
+<h2 style="margin:8px 0 4px">${escapeHtml(userLabel)}</h2>
+<div style="color:#9fb0c3"><code>${escapeHtml(data.discordId)}</code></div>
+<div style="color:#9fb0c3;margin-top:6px">Roles: ${rolePreview}</div>
+</div>
+</div>
+<div class="stats">
+<div class="card"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
+<div class="card"><div class="k">Total Spent (Tier)</div><div class="v">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
+<div class="card"><div class="k">Purchases (Shown)</div><div class="v">${data.purchaseCount}</div></div>
+<div class="card"><div class="k">Last Updated</div><div class="v" style="font-size:14px">${data.member ? formatPrettyTimestamp(data.member.updated_at) : "-"}</div></div>
+</div>
+<div style="margin-top:10px;color:#9fb0c3">${escapeHtml(data.nextTierProgress)}</div>
+</section>
+<section class="panel">
+<h2 style="margin:0 0 10px">Recent Activity</h2>
+<table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>Balance After</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No purchases found.</td></tr>'}</tbody></table>
+</section>
+</div></body></html>`;
+}
+
 async function resolveUserLabels(client, ids) {
     const uniqueIds = [...new Set(ids.filter(Boolean).map(String))];
     const labels = new Map();
@@ -634,10 +767,32 @@ function renderDashboardHtml(data) {
         : primaryPrice
             ? formatTimestamp(primaryPrice.updated_at)
             : "No price set";
-    const topRows = data.topMembers.map((m, i) => `
-      <tr><td>${i + 1}</td><td>${escapeHtml(m.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(m.discord_id))}</code></small></td><td>${escapeHtml(formatGold(m.balance_gold))}</td><td><small>${formatTimestamp(m.updated_at)}</small></td></tr>`).join("");
-    const purchaseRows = data.recentPurchases.map((p) => `
-      <tr><td>${escapeHtml(p.user_label || "Unknown")}<br/><small><code>${escapeHtml(shortDiscordId(p.discord_id))}</code></small></td><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 32))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td><small>${formatTimestamp(p.created_at)}</small></td></tr>`).join("");
+    const detailHref = (discordId) => (
+        data.guildId
+            ? `/g/${encodeURIComponent(data.guildId)}/member/${encodeURIComponent(String(discordId || ""))}`
+            : null
+    );
+    const topRows = data.topMembers.map((m, i) => {
+        const href = detailHref(m.discord_id);
+        const userLabel = escapeHtml(m.user_label || "Unknown");
+        const labelHtml = href ? `<a href="${escapeHtml(href)}" style="color:#8ab7ff;text-decoration:none">${userLabel}</a>` : userLabel;
+        return `<tr><td>${i + 1}</td><td>${labelHtml}<br/><small><code>${escapeHtml(shortDiscordId(m.discord_id))}</code></small></td><td>${escapeHtml(formatGold(m.balance_gold))}</td><td><small>${formatTimestamp(m.updated_at)}</small></td></tr>`;
+    }).join("");
+    const purchaseRows = data.recentPurchases.map((p) => {
+        const href = detailHref(p.discord_id);
+        const userLabel = escapeHtml(p.user_label || "Unknown");
+        const labelHtml = href ? `<a href="${escapeHtml(href)}" style="color:#8ab7ff;text-decoration:none">${userLabel}</a>` : userLabel;
+        return `<tr><td>${labelHtml}<br/><small><code>${escapeHtml(shortDiscordId(p.discord_id))}</code></small></td><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 32))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td><small>${formatTimestamp(p.created_at)}</small></td></tr>`;
+    }).join("");
+    const lookupForm = data.guildId
+        ? `<section class="panel" style="margin-bottom:12px">
+<h2>Member Lookup</h2>
+<form method="GET" action="/g/${encodeURIComponent(data.guildId)}/member" style="display:flex;gap:8px;flex-wrap:wrap">
+<input name="user" placeholder="Discord User ID" required style="background:#0f141b;border:1px solid #2a3340;border-radius:10px;padding:10px 12px;color:#e6edf3;min-width:280px"/>
+<button type="submit" style="background:#2a4d8f;color:#fff;border:1px solid #3c66b2;border-radius:10px;padding:10px 14px;cursor:pointer">Open Member</button>
+</form>
+</section>`
+        : "";
 
     const brandLogo = getDashboardLogoUrl(data.guildIconUrl || null);
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Balance Bot Dashboard</title>${brandLogo ? `<link rel="icon" href="${escapeHtml(brandLogo)}"/>` : ""}
@@ -659,6 +814,7 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--li
 <div class="card"><div class="k">Guild Settings</div><div class="v">${data.settingsCount}</div><div class="sub">Configured guild rows</div></div>
 <div class="card"><div class="k">${showMixedPrices ? "Main Guild Price" : "Latest Price"}</div><div class="v" style="font-size:18px">${escapeHtml(priceText)}</div><div class="sub">${escapeHtml(priceSubtext)}</div></div>
 </div>
+${lookupForm}
 <div class="split">
 <section class="panel"><h2>Top Balances</h2><table><thead><tr><th>#</th><th>User</th><th>Balance</th><th>Updated</th></tr></thead><tbody>${topRows || '<tr><td colspan="4">No member records.</td></tr>'}</tbody></table><div class="links"><a href="/api/overview" target="_blank" rel="noreferrer">Open JSON API</a></div></section>
 <section class="panel"><h2>Recent Purchases</h2><table><thead><tr><th>User</th><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${purchaseRows || '<tr><td colspan="6">No purchases.</td></tr>'}</tbody></table></section>
@@ -856,6 +1012,55 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 const data = await getDashboardData(db, nowISO, getLatestPrice, client);
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
                 res.end(renderDashboardHtml(data));
+                return;
+            }
+
+            if (url.pathname.startsWith("/g/") && url.pathname.endsWith("/member")) {
+                if (!session?.discordId) {
+                    sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname + (url.search || ""))}`);
+                    return;
+                }
+                const rest = url.pathname.slice(3, -"/member".length);
+                const guildId = decodeURIComponent(rest).trim().replace(/\/$/, "");
+                const targetUserId = (url.searchParams.get("user") || "").trim();
+                if (!guildId || !targetUserId) {
+                    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+                    res.end("Missing guild or user id");
+                    return;
+                }
+                const guilds = await getManageableGuilds(db, client, session.discordId);
+                if (!guilds.some((g) => g.guildId === guildId) && !isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+                    res.end(renderGuildAccessDeniedHtml());
+                    return;
+                }
+                sendRedirect(res, `/g/${encodeURIComponent(guildId)}/member/${encodeURIComponent(targetUserId)}`);
+                return;
+            }
+
+            if (url.pathname.startsWith("/g/") && url.pathname.includes("/member/")) {
+                if (!session?.discordId) {
+                    sendRedirect(res, `/login?next=${encodeURIComponent(url.pathname)}`);
+                    return;
+                }
+                const memberMarker = "/member/";
+                const markerIdx = url.pathname.indexOf(memberMarker);
+                const guildId = decodeURIComponent(url.pathname.slice(3, markerIdx)).trim();
+                const targetUserId = decodeURIComponent(url.pathname.slice(markerIdx + memberMarker.length)).trim();
+                if (!guildId || !targetUserId) {
+                    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+                    res.end("Not found");
+                    return;
+                }
+                const guilds = await getManageableGuilds(db, client, session.discordId);
+                if (!guilds.some((g) => g.guildId === guildId) && !isAdminDiscordId(session.discordId)) {
+                    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+                    res.end(renderGuildAccessDeniedHtml());
+                    return;
+                }
+                const data = await getGuildMemberDetailData(db, client, guildId, targetUserId);
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(renderGuildMemberDetailHtml(data));
                 return;
             }
 

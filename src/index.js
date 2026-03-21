@@ -378,6 +378,106 @@ function parseBooleanLike(input) {
     return ["1", "true", "yes", "y", "on"].includes(v);
 }
 
+function parsePublishFieldsRaw(fieldsRaw) {
+    const raw = String(fieldsRaw || "").trim();
+    if (!raw) return { fields: [] };
+
+    const lines = raw.split("\n").map((line) => line.trimEnd());
+    const sectionRegex = /^(?:\[section\]|##)\s*(.+)$/i;
+    const sections = [];
+    let currentSection = null;
+    let sawSectionSyntax = false;
+
+    for (const originalLine of lines) {
+        const line = originalLine.trim();
+        if (!line) continue;
+
+        const sectionMatch = line.match(sectionRegex);
+        if (sectionMatch) {
+            sawSectionSyntax = true;
+            if (currentSection && currentSection.rows.length > 0) {
+                sections.push(currentSection);
+            }
+            currentSection = {
+                title: sectionMatch[1].trim(),
+                rows: [],
+            };
+            continue;
+        }
+
+        if (currentSection) {
+            const parts = line.split("|").map((part) => part.trim());
+            if (parts.length < 2 || !parts[0] || !parts[1]) {
+                return {
+                    error: "ERROR: In section mode, each row must be `Left text | Right text`.",
+                };
+            }
+            currentSection.rows.push({
+                left: parts[0],
+                right: parts[1],
+            });
+        }
+    }
+
+    if (currentSection && currentSection.rows.length > 0) {
+        sections.push(currentSection);
+    }
+
+    if (sawSectionSyntax) {
+        if (sections.length === 0) {
+            return {
+                error: "ERROR: No valid sections found. Use `[Section] Name` then `Left | Right` rows under it.",
+            };
+        }
+
+        const fields = [];
+        for (const [index, section] of sections.entries()) {
+            const leftColumn = [];
+            const rightColumn = [];
+
+            for (const row of section.rows) {
+                leftColumn.push(row.left);
+                rightColumn.push(row.right);
+            }
+
+            fields.push({
+                name: section.title || "Section",
+                value: leftColumn.join("\n").slice(0, 1024) || "-",
+                inline: true,
+            });
+            fields.push({
+                name: "Price",
+                value: rightColumn.join("\n").slice(0, 1024) || "-",
+                inline: true,
+            });
+
+            if (index < sections.length - 1) {
+                fields.push({
+                    name: "\u200B",
+                    value: "\u200B",
+                    inline: false,
+                });
+            }
+        }
+
+        return { fields };
+    }
+
+    const fields = [];
+    for (const line of raw.split("\n").map((l) => l.trim()).filter(Boolean)) {
+        const parts = line.split("|").map((p) => p.trim());
+        if (parts.length < 2 || !parts[0] || !parts[1]) {
+            return {
+                error: "ERROR: Field line format must be: Name | Value | inline(optional yes/no)",
+            };
+        }
+        const inline = parts[2] ? parseBooleanLike(parts[2]) : false;
+        fields.push({ name: parts[0], value: parts[1], inline });
+    }
+
+    return { fields };
+}
+
 function publishTextModal() {
     const modal = new ModalBuilder()
         .setCustomId("publishtext_modal")
@@ -429,10 +529,10 @@ function publishEmbedModalWithToken(token) {
 
     const fieldsRaw = new TextInputBuilder()
         .setCustomId("fields_raw")
-        .setLabel("Fields (one per line: Name | Value | inline)")
+        .setLabel("Fields / Price Layout")
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
-        .setPlaceholder("Price | 45 USD / 1M | yes");
+        .setPlaceholder("[Section] Delves\nTier 1 | 30k\nTier 2 | 40k");
 
     const messageText = new TextInputBuilder()
         .setCustomId("message_text")
@@ -1735,23 +1835,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const fieldsRaw = interaction.fields.getTextInputValue("fields_raw").trim();
                 const messageText = interaction.fields.getTextInputValue("message_text").trim();
 
-                const fields = [];
-                if (fieldsRaw) {
-                    const lines = fieldsRaw.split("\n").map((l) => l.trim()).filter(Boolean);
-                    if (lines.length > 10) {
-                        return interaction.reply({ content: "ERROR: Maximum 10 field lines.", ephemeral: true });
-                    }
-                    for (const line of lines) {
-                        const parts = line.split("|").map((p) => p.trim());
-                        if (parts.length < 2 || !parts[0] || !parts[1]) {
-                            return interaction.reply({
-                                content: "ERROR: Field line format must be: Name | Value | inline(optional yes/no)",
-                                ephemeral: true,
-                            });
-                        }
-                        const inline = parts[2] ? parseBooleanLike(parts[2]) : false;
-                        fields.push({ name: parts[0], value: parts[1], inline });
-                    }
+                const parsedFields = parsePublishFieldsRaw(fieldsRaw);
+                if (parsedFields.error) {
+                    return interaction.reply({
+                        content: parsedFields.error,
+                        ephemeral: true,
+                    });
+                }
+                const fields = parsedFields.fields || [];
+                if (fields.length > 25) {
+                    return interaction.reply({ content: "ERROR: Too many generated fields. Keep the layout shorter.", ephemeral: true });
                 }
 
                 const targetChannel = interaction.guild.channels.cache.get(draft.channelId)

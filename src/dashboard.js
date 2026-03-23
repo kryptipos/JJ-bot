@@ -42,6 +42,31 @@ function formatPrettyTimestamp(ts) {
     );
 }
 
+function formatRelativeTimestamp(ts) {
+    if (!ts) return "-";
+    const then = new Date(ts);
+    if (Number.isNaN(then.getTime())) return "-";
+
+    const diffMs = Date.now() - then.getTime();
+    const absDiffMs = Math.abs(diffMs);
+    const tense = diffMs >= 0 ? "ago" : "from now";
+    const minuteMs = 60 * 1000;
+    const hourMs = 60 * minuteMs;
+    const dayMs = 24 * hourMs;
+
+    if (absDiffMs < minuteMs) return "just now";
+    if (absDiffMs < hourMs) {
+        const minutes = Math.round(absDiffMs / minuteMs);
+        return `${minutes} min${minutes === 1 ? "" : "s"} ${tense}`;
+    }
+    if (absDiffMs < dayMs) {
+        const hours = Math.round(absDiffMs / hourMs);
+        return `${hours} hour${hours === 1 ? "" : "s"} ${tense}`;
+    }
+    const days = Math.round(absDiffMs / dayMs);
+    return `${days} day${days === 1 ? "" : "s"} ${tense}`;
+}
+
 function formatGold(n) {
     const value = Number(n) || 0;
     if (value >= 1_000_000) {
@@ -372,8 +397,7 @@ async function getGuildMemberDetailData(db, client, guildId, discordId) {
             `SELECT kind, details, gold_cost, balance_after, created_at
              FROM purchases
              WHERE guild_id = $1 AND discord_id = $2
-             ORDER BY id DESC
-             LIMIT 50`,
+             ORDER BY created_at DESC, id DESC`,
             [guildId, discordId]
         ),
         db.query(
@@ -641,7 +665,7 @@ function renderGuildMemberDetailHtml(data) {
         <td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 60))}</td>
         <td>${String(p.kind || "").toLowerCase() === "addbal" ? "+" : "-"}${escapeHtml(formatGold(p.gold_cost))}</td>
         <td>${escapeHtml(formatGold(p.balance_after))}</td>
-        <td><small>${formatTimestamp(p.created_at)}</small></td>
+        <td><div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><small>${formatTimestamp(p.created_at)}</small><small style="color:#9fb0c3;white-space:nowrap">${escapeHtml(formatRelativeTimestamp(p.created_at))}</small></div></td>
       </tr>`).join("");
     const tierColor = ({
         Legendary: "#f39c12",

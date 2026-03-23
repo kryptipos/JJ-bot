@@ -630,20 +630,19 @@ function renderSimpleActionPage({ title, message, backHref = "/me", primaryLinkH
 function renderGuildMemberDetailHtml(data) {
     const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
     const rolePreview = data.guildRoleNames.length ? escapeHtml(data.guildRoleNames.slice(0, 8).join(", ")) : "No role data";
-    const renderRows = (items, signMode = "auto") => items.map((p) => `
+    const sortedActivity = [...data.purchases].sort((a, b) => {
+        const aTime = new Date(a?.created_at || 0).getTime();
+        const bTime = new Date(b?.created_at || 0).getTime();
+        return bTime - aTime;
+    });
+    const renderRows = (items) => items.map((p) => `
       <tr>
         <td>${escapeHtml(String(p.kind || "").toUpperCase())}</td>
         <td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 60))}</td>
-        <td>${signMode === "plus" ? "+" : signMode === "minus" ? "-" : (String(p.kind || "").toLowerCase() === "addbal" ? "+" : "-")}${escapeHtml(formatGold(p.gold_cost))}</td>
+        <td>${String(p.kind || "").toLowerCase() === "addbal" ? "+" : "-"}${escapeHtml(formatGold(p.gold_cost))}</td>
         <td>${escapeHtml(formatGold(p.balance_after))}</td>
         <td><small>${formatTimestamp(p.created_at)}</small></td>
       </tr>`).join("");
-    const addbalRows = data.purchases.filter((p) => String(p.kind || "").toLowerCase() === "addbal");
-    const withdrawRows = data.purchases.filter((p) => String(p.kind || "").toLowerCase() === "withdraw");
-    const purchaseRows = data.purchases.filter((p) => {
-        const k = String(p.kind || "").toLowerCase();
-        return k !== "addbal" && k !== "withdraw";
-    });
     const tierColor = ({
         Legendary: "#f39c12",
         Epic: "#9b59b6",
@@ -693,16 +692,8 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 <div style="margin-top:10px;color:#9fb0c3">${escapeHtml(data.nextTierProgress)}</div>
 </section>
 <section class="panel">
-<h2 style="margin:0 0 10px">Add Balance Activity (Getting Gold)</h2>
-<table><thead><tr><th>Kind</th><th>Details</th><th>Amount</th><th>Balance After</th><th>Time</th></tr></thead><tbody>${renderRows(addbalRows, "plus") || '<tr><td colspan="5">No add balance activity.</td></tr>'}</tbody></table>
-</section>
-<section class="panel">
-<h2 style="margin:0 0 10px">Boost Purchase Activity</h2>
-<table><thead><tr><th>Kind</th><th>Details</th><th>Amount</th><th>Balance After</th><th>Time</th></tr></thead><tbody>${renderRows(purchaseRows, "minus") || '<tr><td colspan="5">No purchase activity.</td></tr>'}</tbody></table>
-</section>
-<section class="panel">
-<h2 style="margin:0 0 10px">Withdraw Gold Activity</h2>
-<table><thead><tr><th>Kind</th><th>Details</th><th>Amount</th><th>Balance After</th><th>Time</th></tr></thead><tbody>${renderRows(withdrawRows, "minus") || '<tr><td colspan="5">No withdraw activity.</td></tr>'}</tbody></table>
+<h2 style="margin:0 0 10px">Activity History</h2>
+<table><thead><tr><th>Kind</th><th>Details</th><th>Amount</th><th>Balance After</th><th>Time</th></tr></thead><tbody>${renderRows(sortedActivity) || '<tr><td colspan="5">No activity history.</td></tr>'}</tbody></table>
 </section>
 </div></body></html>`;
 }

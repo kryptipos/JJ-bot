@@ -493,97 +493,162 @@ function renderUserDashboardHtml(data) {
     const rows = data.purchases.map((p) => `
       <tr><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 40))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td>${formatTimestamp(p.created_at)}</td></tr>`).join("");
     const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
-    const adminLink = [
-        data.isAdmin
-            ? `<a href="/admin" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#1a2433;border:1px solid #2a3340;color:#e6edf3;text-decoration:none">Go to Admin Dashboard</a>`
-            : "",
-        `<a href="/guilds" style="display:inline-block;padding:8px 12px;border-radius:10px;background:#131d2b;border:1px solid #2a3340;color:#e6edf3;text-decoration:none;margin-left:${data.isAdmin ? "8px" : "0"}">Manage My Servers</a>`,
-    ].filter(Boolean).join("");
+    const adminLink = data.isAdmin ? `<a class="ghost-link" href="/admin">Admin Dashboard</a>` : "";
     const tierColor = ({
-        Legendary: "#f39c12",
-        Epic: "#9b59b6",
-        Rare: "#3498db",
-        Common: "#95a5a6",
-    })[data.guildRole || "Common"] || "#95a5a6";
+        Legendary: "#f4c65d",
+        Epic: "#d79cff",
+        Rare: "#71d7ff",
+        Common: "#b7c2cf",
+    })[data.guildRole || "Common"] || "#b7c2cf";
     const tierTheme = ({
-        Legendary: {
-            glowA: "rgba(243,156,18,.22)",
-            glowB: "rgba(231,76,60,.14)",
-            bg1: "#1b1510",
-            bg2: "#121018",
-        },
-        Epic: {
-            glowA: "rgba(155,89,182,.24)",
-            glowB: "rgba(76,141,255,.12)",
-            bg1: "#171224",
-            bg2: "#10131d",
-        },
-        Rare: {
-            glowA: "rgba(52,152,219,.24)",
-            glowB: "rgba(47,196,166,.12)",
-            bg1: "#111a26",
-            bg2: "#0f151f",
-        },
-        Common: {
-            glowA: "rgba(149,165,166,.18)",
-            glowB: "rgba(76,141,255,.10)",
-            bg1: "#131922",
-            bg2: "#10161f",
-        },
+        Legendary: { glowA: "rgba(244,198,93,.20)", glowB: "rgba(222,122,46,.12)", surface: "#17120c" },
+        Epic: { glowA: "rgba(215,156,255,.20)", glowB: "rgba(110,93,255,.12)", surface: "#13101b" },
+        Rare: { glowA: "rgba(113,215,255,.18)", glowB: "rgba(50,191,165,.12)", surface: "#0f151b" },
+        Common: { glowA: "rgba(183,194,207,.14)", glowB: "rgba(74,118,255,.10)", surface: "#10151b" },
     })[data.guildRole || "Common"] || {
-        glowA: "rgba(149,165,166,.18)",
-        glowB: "rgba(76,141,255,.10)",
-        bg1: "#131922",
-        bg2: "#10161f",
+        glowA: "rgba(183,194,207,.14)",
+        glowB: "rgba(74,118,255,.10)",
+        surface: "#10151b",
     };
     const faviconUrl = getDashboardLogoUrl(data.guildIconUrl || data.avatarUrl);
     const orderHref = data.selectedGuildId ? `/me/order?guild=${encodeURIComponent(data.selectedGuildId)}` : "/me/order";
-    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>My Dashboard</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
+    const featuredCards = [
+        { title: "Mythic+ Runs", desc: "Fast key clears, armor stack options, and smooth repeat ordering.", accent: "#ffb347" },
+        { title: "Raid Boosts", desc: "Heroic clears and scheduled runs presented like a real storefront.", accent: "#7dd3fc" },
+        { title: "PvP Services", desc: "Rating help, cap pushes, and seasonal goals from one clean landing page.", accent: "#c084fc" },
+    ];
+    const featuredHtml = featuredCards.map((card) => `
+      <article class="service-card">
+        <div class="service-badge" style="--accent:${card.accent}">${escapeHtml(card.title)}</div>
+        <p>${escapeHtml(card.desc)}</p>
+        <a href="${escapeHtml(orderHref)}">Order Now</a>
+      </article>`).join("");
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Storefront</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>
-body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:20px}
-.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.panel{background:#161b22;border:1px solid #2a3340;border-radius:14px;padding:14px;margin-top:14px}
-.hero{display:flex;gap:10px;align-items:center}.hero img{width:40px;height:40px;border-radius:50%;border:2px solid #2a3340}.muted{color:#9fb0c3}
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.card{background:#141a22;border:1px solid #2a3340;border-radius:12px;padding:12px}.k{color:#9fb0c3;font-size:12px}.v{font-size:22px;font-weight:700;margin-top:6px}
-.member-card{margin-top:14px;border-radius:18px;padding:16px;border:1px solid #2a3340;background:
- radial-gradient(520px 240px at 90% -10%, ${tierTheme.glowA}, transparent 62%),
- radial-gradient(420px 220px at 0% 100%, ${tierTheme.glowB}, transparent 60%),
- linear-gradient(180deg,${tierTheme.bg1},${tierTheme.bg2}); box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 12px 30px rgba(0,0,0,.18);}
-.member-card-grid{display:grid;grid-template-columns:120px 1fr;gap:16px;align-items:center}
-.avatar-big{width:108px;height:108px;border-radius:50%;border:4px solid ${tierColor};object-fit:cover;background:#0b0f14}
-.tier-pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:color-mix(in srgb, ${tierColor} 10%, transparent);font-weight:700;font-size:12px;box-shadow:0 0 0 1px rgba(255,255,255,.02) inset}
-.member-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
-.member-stat{background:#0f141b;border:1px solid #263140;border-radius:12px;padding:10px}
-.meta-chip{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:7px 10px;border-radius:999px;border:1px solid #2a3340;background:linear-gradient(180deg,#111723,#0e141d);color:#b8c7d8;font-size:12px}
-.meta-chip strong{color:#d8e6f5;font-weight:700}
-table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #2a3340;text-align:left;font-size:13px}th{color:#9fb0c3}
-a{color:#68a3ff;text-decoration:none}a:hover{text-decoration:underline}
-@media(max-width:700px){.cards,.member-stats{grid-template-columns:1fr}.top{flex-direction:column;align-items:start}.member-card-grid{grid-template-columns:1fr}}
+  :root{--bg:#090b10;--panel:#121722;--line:rgba(177,196,220,.14);--text:#eef4ff;--muted:#9aa9bf;--brand:#e8b15b;--brand-soft:rgba(232,177,91,.14);--link:#a7c8ff}
+  *{box-sizing:border-box}
+  body{margin:0;color:var(--text);font-family:Segoe UI,Arial,sans-serif;background:radial-gradient(720px 340px at 0% 0%, ${tierTheme.glowA}, transparent 60%),radial-gradient(720px 380px at 100% 0%, ${tierTheme.glowB}, transparent 60%),linear-gradient(180deg,#07090d 0%, #0a0e14 40%, #090b10 100%)}
+  a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+  .wrap{max-width:1140px;margin:0 auto;padding:24px 18px 40px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand img{width:44px;height:44px;border-radius:14px;object-fit:cover;border:1px solid var(--line)}
+  .brand h1{margin:0;font-size:18px}
+  .brand p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  .top-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .ghost-link,.top-actions a{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.02);color:var(--text);text-decoration:none}
+  .hero{margin-top:18px;padding:28px;border-radius:28px;border:1px solid var(--line);background:radial-gradient(520px 260px at 100% 0%, rgba(232,177,91,.13), transparent 62%),radial-gradient(420px 240px at 0% 100%, rgba(111,213,255,.10), transparent 58%),linear-gradient(180deg, rgba(20,25,35,.96), rgba(13,17,24,.98));box-shadow:0 16px 50px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.03)}
+  .hero-grid{display:grid;grid-template-columns:1.3fr .9fr;gap:18px;align-items:stretch}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:var(--brand-soft);border:1px solid rgba(232,177,91,.24);color:#ffd08b;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+  .hero h2{margin:16px 0 10px;font-size:46px;line-height:.95;letter-spacing:-.04em;max-width:10ch}
+  .hero-copy{max-width:58ch;color:#c6d1df;font-size:15px;line-height:1.65}
+  .cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}
+  .cta-primary,.cta-secondary{display:inline-flex;align-items:center;justify-content:center;padding:13px 18px;border-radius:14px;font-weight:700;text-decoration:none}
+  .cta-primary{background:linear-gradient(135deg,#f0c46d,#c78639);color:#171108;border:1px solid rgba(255,215,151,.35)}
+  .cta-secondary{background:rgba(255,255,255,.02);color:var(--text);border:1px solid var(--line)}
+  .member-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:radial-gradient(420px 240px at 100% -10%, ${tierTheme.glowA}, transparent 65%),linear-gradient(180deg, ${tierTheme.surface}, #0c1016)}
+  .member-head{display:flex;gap:14px;align-items:center}
+  .avatar-big{width:88px;height:88px;border-radius:22px;border:2px solid ${tierColor};object-fit:cover;background:#0b0f14}
+  .tier-pill{display:inline-flex;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:rgba(255,255,255,.03);font-size:12px;font-weight:700}
+  .member-name{margin:10px 0 4px;font-size:26px}
+  .member-sub{color:var(--muted);font-size:13px}
+  .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
+  .metric{padding:12px;border-radius:16px;background:#0d1118;border:1px solid rgba(255,255,255,.06)}
+  .metric .k{color:var(--muted);font-size:12px}
+  .metric .v{margin-top:6px;font-size:20px;font-weight:800}
+  .mini-meta{margin-top:16px;color:#b7c4d6;font-size:13px}
+  .section{margin-top:18px}
+  .section-head{display:flex;justify-content:space-between;align-items:end;gap:12px;margin-bottom:12px}
+  .section-head h3{margin:0;font-size:24px;letter-spacing:-.03em}
+  .section-head p{margin:4px 0 0;color:var(--muted)}
+  .service-grid,.trust-grid,.metric-grid{display:grid;gap:14px}
+  .service-grid,.trust-grid{grid-template-columns:repeat(3,1fr)}
+  .service-card{padding:18px;border-radius:20px;border:1px solid var(--line);background:linear-gradient(180deg,#121821,#0e131b)}
+  .service-badge{display:inline-flex;padding:6px 10px;border-radius:999px;background:color-mix(in srgb, var(--accent) 15%, transparent);border:1px solid color-mix(in srgb, var(--accent) 32%, transparent);color:var(--accent);font-size:12px;font-weight:700}
+  .service-card p{margin:14px 0 16px;color:#c6d1df;line-height:1.6;min-height:72px}
+  .service-card a{display:inline-flex;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#171e29;color:#eef4ff;text-decoration:none;font-weight:700}
+  .panel{padding:20px;border-radius:22px;border:1px solid var(--line);background:linear-gradient(180deg,#111722,#0d121a)}
+  .trust-card{padding:16px;border-radius:18px;border:1px solid rgba(255,255,255,.06);background:#0d1218}
+  .trust-card strong{display:block;font-size:16px}
+  .trust-card span{display:block;margin-top:6px;color:var(--muted);line-height:1.5;font-size:13px}
+  table{width:100%;border-collapse:collapse}th,td{padding:10px 6px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;font-size:13px}th{color:var(--muted);font-weight:600}
+  .empty-state{padding:18px;border-radius:16px;border:1px dashed rgba(255,255,255,.12);background:#0c1117;color:var(--muted)}
+  @media(max-width:920px){.hero-grid,.service-grid,.trust-grid,.metric-grid{grid-template-columns:1fr}.hero h2{font-size:36px;max-width:none}}
+  @media(max-width:640px){.wrap{padding:16px 14px 32px}.topbar{flex-direction:column;align-items:flex-start}.top-actions{width:100%}.top-actions a,.ghost-link{flex:1}.hero{padding:22px}.member-head{align-items:flex-start}}
 </style></head><body><div class="wrap">
-<div class="top"><div class="hero">${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="server logo"/>` : ""}<div><h1 style="margin:0;font-size:18px">My Dashboard</h1><div style="margin-top:10px">${adminLink}</div></div></div><div><a href="/logout">Logout</a></div></div>
-<section class="member-card">
-  <div class="member-card-grid">
-    <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>
+<header class="topbar">
+  <div class="brand">
+    ${(data.guildIconUrl || data.avatarUrl) ? `<img src="${escapeHtml(data.guildIconUrl || data.avatarUrl)}" alt="brand"/>` : ""}
     <div>
-      <div class="tier-pill">${escapeHtml((data.guildRole || "Member") + " Tier")}</div>
-      <h2 style="margin:10px 0 4px;font-size:26px">${escapeHtml(userLabel)}</h2>
-      <div class="muted">Member Card</div>
-      <div class="member-stats">
-        <div class="member-stat"><div class="k">Balance</div><div class="v" style="font-size:18px">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
-        <div class="member-stat"><div class="k">Total Spent</div><div class="v" style="font-size:18px">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
-        <div class="member-stat"><div class="k">Purchases</div><div class="v" style="font-size:18px">${data.purchases.length}</div></div>
-      </div>
-      <div class="meta-chip"><strong>Last Updated</strong><span>${data.member ? formatPrettyTimestamp(data.member.updated_at) : "-"}</span></div>
+      <h1>Boost Store</h1>
+      <p>Member-facing storefront with balance and ordering built in.</p>
     </div>
   </div>
-</section>
-<section class="panel">
-  <h2 style="margin:0 0 10px">Actions</h2>
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
-    <a href="${escapeHtml(orderHref)}" style="display:inline-block;padding:10px 14px;border-radius:10px;background:#1e2816;border:1px solid #304224;color:#e6edf3;text-decoration:none">Order Gold / Boost</a>
+  <div class="top-actions">
+    ${adminLink}
+    <a href="/guilds">Servers</a>
+    <a href="/logout">Logout</a>
+  </div>
+</header>
+<section class="hero">
+  <div class="hero-grid">
+    <div>
+      <div class="eyebrow">Premium Game Services</div>
+      <h2>Order like a storefront, not a control panel.</h2>
+      <p class="hero-copy">This member page now feels closer to a sales landing page. Users still keep access to their balance, total spent, and purchase history, but the first thing they see is a cleaner storefront-style experience.</p>
+      <div class="cta-row">
+        <a class="cta-primary" href="${escapeHtml(orderHref)}">Start an Order</a>
+        <a class="cta-secondary" href="#history">View Purchase History</a>
+      </div>
+    </div>
+    <aside class="member-card">
+      <div class="member-head">
+        <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>
+        <div>
+          <div class="tier-pill">${escapeHtml((data.guildRole || "Member") + " Tier")}</div>
+          <div class="member-name">${escapeHtml(userLabel)}</div>
+          <div class="member-sub">Private member overview for faster repeat orders.</div>
+        </div>
+      </div>
+      <div class="metric-grid">
+        <div class="metric"><div class="k">Balance</div><div class="v">${data.member ? escapeHtml(formatGold(data.member.balance_gold)) : "No Record"}</div></div>
+        <div class="metric"><div class="k">Total Spent</div><div class="v">${escapeHtml(formatGold(data.totalSpentGold || 0))}</div></div>
+        <div class="metric"><div class="k">Orders</div><div class="v">${data.purchases.length}</div></div>
+      </div>
+      <div class="mini-meta">Last updated: ${data.member ? escapeHtml(formatPrettyTimestamp(data.member.updated_at)) : "-"}</div>
+    </aside>
   </div>
 </section>
-<section class="panel"><h2 style="margin:0 0 10px">Your Recent Purchases</h2>
-<table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No purchases yet.</td></tr>'}</tbody></table>
+<section class="section">
+  <div class="section-head">
+    <div>
+      <h3>Featured Services</h3>
+      <p>Starter categories to make the page feel like a real storefront.</p>
+    </div>
+  </div>
+  <div class="service-grid">${featuredHtml}</div>
+</section>
+<section class="section panel">
+  <div class="section-head">
+    <div>
+      <h3>Why Members Use This</h3>
+      <p>Trust-building copy sells better here than a plain dashboard heading.</p>
+    </div>
+  </div>
+  <div class="trust-grid">
+    <div class="trust-card"><strong>Fast repeat orders</strong><span>Members can jump into your order flow without hunting through Discord channels.</span></div>
+    <div class="trust-card"><strong>Private account view</strong><span>Each user still sees only their own balance, spend, and history.</span></div>
+    <div class="trust-card"><strong>Sales-first presentation</strong><span>The page now feels more like a boosting site and less like an internal admin tool.</span></div>
+  </div>
+</section>
+<section id="history" class="section panel">
+  <div class="section-head">
+    <div>
+      <h3>Recent Purchases</h3>
+      <p>Your existing order history stays available below the storefront content.</p>
+    </div>
+  </div>
+  ${rows ? `<table><thead><tr><th>Kind</th><th>Details</th><th>Cost</th><th>After</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty-state">No purchases yet. Use the order button above to start your first order.</div>'}
 </section></div></body></html>`;
 }
 
@@ -659,8 +724,9 @@ function renderGuildMemberDetailHtml(data) {
         const bTime = new Date(b?.created_at || 0).getTime();
         return bTime - aTime;
     });
+    const activityKinds = [...new Set(sortedActivity.map((p) => String(p.kind || "").toUpperCase()).filter(Boolean))];
     const renderRows = (items) => items.map((p) => `
-      <tr>
+      <tr data-kind="${escapeHtml(String(p.kind || "").toUpperCase())}">
         <td>${escapeHtml(String(p.kind || "").toUpperCase())}</td>
         <td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 60))}</td>
         <td>${String(p.kind || "").toLowerCase() === "addbal" ? "+" : "-"}${escapeHtml(formatGold(p.gold_cost))}</td>
@@ -688,6 +754,9 @@ body{margin:0;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Arial,sans-s
 .card{background:#10151d;border:1px solid #2a3340;border-radius:12px;padding:10px}
 .k{color:#9fb0c3;font-size:12px}.v{font-size:20px;font-weight:700;margin-top:4px}
 table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1px solid #2a3340;text-align:left;font-size:13px}th{color:#9fb0c3}
+.history-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.history-toolbar select{background:#10151d;border:1px solid #2a3340;border-radius:10px;color:#e6edf3;padding:8px 10px}
+.history-empty{display:none;padding:14px 8px;color:#9fb0c3;text-align:center}
 @media (max-width:800px){.stats{grid-template-columns:1fr 1fr}.hero{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
 <div class="top">
@@ -716,9 +785,39 @@ table{width:100%;border-collapse:collapse}th,td{padding:8px 6px;border-bottom:1p
 <div style="margin-top:10px;color:#9fb0c3">${escapeHtml(data.nextTierProgress)}</div>
 </section>
 <section class="panel">
-<h2 style="margin:0 0 10px">Activity History</h2>
-<table><thead><tr><th>Kind</th><th>Details</th><th>Amount</th><th>Balance After</th><th>Time</th></tr></thead><tbody>${renderRows(sortedActivity) || '<tr><td colspan="5">No activity history.</td></tr>'}</tbody></table>
+<div class="history-toolbar">
+<h2 style="margin:0">Activity History</h2>
+<label style="display:flex;align-items:center;gap:8px;color:#9fb0c3;font-size:13px">Kind
+<select id="activity-kind-filter">
+<option value="ALL">All kinds</option>
+${activityKinds.map((kind) => `<option value="${escapeHtml(kind)}">${escapeHtml(kind)}</option>`).join("")}
+</select>
+</label>
+</div>
+<table><thead><tr><th>Kind</th><th>Details</th><th>Amount</th><th>Balance After</th><th>Time</th></tr></thead><tbody id="activity-history-body">${renderRows(sortedActivity) || '<tr><td colspan="5">No activity history.</td></tr>'}</tbody></table>
+<div id="activity-history-empty" class="history-empty">No activity for this kind.</div>
 </section>
+<script>
+(() => {
+  const filter = document.getElementById("activity-kind-filter");
+  const body = document.getElementById("activity-history-body");
+  const empty = document.getElementById("activity-history-empty");
+  if (!filter || !body) return;
+  const rows = Array.from(body.querySelectorAll("tr[data-kind]"));
+  const applyFilter = () => {
+    const selected = filter.value;
+    let visible = 0;
+    for (const row of rows) {
+      const show = selected === "ALL" || row.getAttribute("data-kind") === selected;
+      row.style.display = show ? "" : "none";
+      if (show) visible += 1;
+    }
+    if (empty) empty.style.display = visible === 0 ? "block" : "none";
+  };
+  filter.addEventListener("change", applyFilter);
+  applyFilter();
+})();
+</script>
 </div></body></html>`;
 }
 
@@ -886,6 +985,24 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
             const cookies = parseCookies(req);
             const sessionId = cookies.jj_dash_session;
             const session = sessionId ? sessions.get(sessionId) : null;
+
+            if (url.pathname === "/") {
+                if (session?.discordId) {
+                    sendRedirect(res, "/dashboard");
+                    return;
+                }
+                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+                res.end(
+                    renderSimpleActionPage({
+                        title: "Login With Discord",
+                        message: "Sign in with Discord to access your member storefront and dashboard.",
+                        backHref: "/login?next=%2Fdashboard",
+                        primaryLinkHref: "/login?next=%2Fdashboard",
+                        primaryLinkLabel: "Continue With Discord",
+                    })
+                );
+                return;
+            }
 
             if (url.pathname === "/health") {
                 res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });

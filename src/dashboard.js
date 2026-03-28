@@ -716,6 +716,77 @@ function renderSimpleActionPage({ title, message, backHref = "/me", primaryLinkH
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${primaryLinkHref ? `<p><a href="${escapeHtml(primaryLinkHref)}" target="_blank" rel="noreferrer">${escapeHtml(primaryLinkLabel || "Open Discord")}</a></p>` : ""}<p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
 }
 
+function renderLandingPage({ loggedIn = false } = {}) {
+    const faviconUrl = getDashboardLogoUrl();
+    const primaryHref = loggedIn ? "/me" : "/login?next=%2Fme";
+    const primaryLabel = loggedIn ? "Open Store" : "Login With Discord";
+    return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>JJBoost</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
+<style>
+  :root{--bg:#07090e;--line:rgba(177,196,220,.14);--text:#eef4ff;--muted:#a4b2c6;--gold:#e5b15d;--gold-deep:#b87934;--panel:rgba(16,20,28,.84)}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;color:var(--text);font-family:Segoe UI,Arial,sans-serif;background:
+    radial-gradient(720px 360px at 8% 0%, rgba(109,88,255,.18), transparent 62%),
+    radial-gradient(640px 360px at 100% 10%, rgba(229,177,93,.16), transparent 60%),
+    linear-gradient(180deg,#07090e 0%,#0a0f16 40%,#090c12 100%)}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 18px 42px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:46px;height:46px;border-radius:14px;border:1px solid var(--line);display:grid;place-items:center;background:linear-gradient(180deg,#171d28,#0e131b);color:var(--gold);font-weight:800;font-size:22px}
+  .brand h1{margin:0;font-size:18px}
+  .brand p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  .toplink{color:#dbe7f7;text-decoration:none;font-size:14px}
+  .hero{margin-top:22px;padding:34px;border-radius:30px;border:1px solid var(--line);background:
+    radial-gradient(540px 280px at 100% 0%, rgba(229,177,93,.12), transparent 64%),
+    radial-gradient(420px 220px at 0% 100%, rgba(109,88,255,.12), transparent 60%),
+    linear-gradient(180deg,rgba(18,24,34,.96),rgba(11,15,22,.98));
+    box-shadow:0 18px 55px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.03)}
+  .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:22px;align-items:center}
+  .eyebrow{display:inline-flex;padding:8px 12px;border-radius:999px;border:1px solid rgba(229,177,93,.22);background:rgba(229,177,93,.08);color:#ffd694;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+  .hero h2{margin:16px 0 12px;font-size:58px;line-height:.92;letter-spacing:-.05em;max-width:10ch}
+  .hero p{margin:0;max-width:58ch;color:#c3cfdd;line-height:1.7;font-size:15px}
+  .cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}
+  .cta{display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;text-decoration:none;font-weight:800}
+  .cta-primary{background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#171108;border:1px solid rgba(255,219,165,.32)}
+  .cta-secondary{background:rgba(255,255,255,.03);color:var(--text);border:1px solid var(--line)}
+  .feature-panel{padding:24px;border-radius:24px;border:1px solid rgba(255,255,255,.08);background:var(--panel)}
+  .feature-panel h3{margin:0 0 12px;font-size:24px}
+  .feature-list{display:grid;gap:12px}
+  .feature{padding:14px;border-radius:16px;background:#0d1218;border:1px solid rgba(255,255,255,.06)}
+  .feature strong{display:block}
+  .feature span{display:block;margin-top:6px;color:var(--muted);line-height:1.5;font-size:13px}
+  @media(max-width:920px){.hero-grid{grid-template-columns:1fr}.hero h2{font-size:42px;max-width:none}}
+  @media(max-width:640px){.wrap{padding:16px 14px 30px}.topbar{flex-direction:column;align-items:flex-start}.hero{padding:24px}}
+</style></head><body><div class="wrap">
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">J</div>
+    <div><h1>JJBoost</h1><p>Premium World of Warcraft services</p></div>
+  </div>
+  ${loggedIn ? '<a class="toplink" href="/logout">Logout</a>' : ""}
+</header>
+<section class="hero">
+  <div class="hero-grid">
+    <div>
+      <div class="eyebrow">Boosting Marketplace</div>
+      <h2>Fast, clean boosts with one Discord login.</h2>
+      <p>Browse JJBoost from a proper homepage instead of a dashboard. Login with Discord to continue into your account and storefront experience.</p>
+      <div class="cta-row">
+        <a class="cta cta-primary" href="${escapeHtml(primaryHref)}">${escapeHtml(primaryLabel)}</a>
+        <a class="cta cta-secondary" href="https://discord.gg" target="_blank" rel="noreferrer">Join Discord</a>
+      </div>
+    </div>
+    <aside class="feature-panel">
+      <h3>What you get</h3>
+      <div class="feature-list">
+        <div class="feature"><strong>Simple entry</strong><span>No more manage-servers page as the public entry point.</span></div>
+        <div class="feature"><strong>Discord login</strong><span>Members use one button to sign in and continue into the site.</span></div>
+        <div class="feature"><strong>Store-first flow</strong><span>The website feels like a storefront first, with account info after login.</span></div>
+      </div>
+    </aside>
+  </div>
+</section></div></body></html>`;
+}
+
 function renderGuildMemberDetailHtml(data) {
     const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
     const rolePreview = data.guildRoleNames.length ? escapeHtml(data.guildRoleNames.slice(0, 8).join(", ")) : "No role data";
@@ -987,20 +1058,8 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
             const session = sessionId ? sessions.get(sessionId) : null;
 
             if (url.pathname === "/") {
-                if (session?.discordId) {
-                    sendRedirect(res, "/dashboard");
-                    return;
-                }
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(
-                    renderSimpleActionPage({
-                        title: "Login With Discord",
-                        message: "Sign in with Discord to access your member storefront and dashboard.",
-                        backHref: "/login?next=%2Fdashboard",
-                        primaryLinkHref: "/login?next=%2Fdashboard",
-                        primaryLinkLabel: "Continue With Discord",
-                    })
-                );
+                res.end(renderLandingPage({ loggedIn: Boolean(session?.discordId) }));
                 return;
             }
 
@@ -1018,7 +1077,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                     return;
                 }
                 const state = crypto.randomBytes(16).toString("hex");
-                const next = url.searchParams.get("next") || "/dashboard";
+                const next = url.searchParams.get("next") || "/me";
                 oauthStates.set(state, { createdAt: Date.now(), next });
                 sendRedirect(res, buildDiscordOAuthUrl(state));
                 return;
@@ -1045,7 +1104,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
                 });
                 sendRedirect(
                     res,
-                    oauthState?.next || "/dashboard",
+                    oauthState?.next || "/me",
                     [`jj_dash_session=${encodeURIComponent(newSessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`]
                 );
                 return;
@@ -1059,7 +1118,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
 
             if (url.pathname === "/me") {
                 if (!session?.discordId) {
-                    sendRedirect(res, "/login?next=%2Fdashboard");
+                    sendRedirect(res, "/");
                     return;
                 }
                 const requestedGuildId = url.searchParams.get("guild") || null;
@@ -1086,36 +1145,7 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
             }
 
             if (url.pathname === "/dashboard" || url.pathname === "/guilds") {
-                if (!session?.discordId) {
-                    sendRedirect(res, "/login?next=%2Fdashboard");
-                    return;
-                }
-                let guilds = [];
-                try {
-                    const oauthGuilds = await fetchDiscordUserGuilds(session.accessToken);
-                    guilds = (Array.isArray(oauthGuilds) ? oauthGuilds : []).map((g) => {
-                        const guildId = String(g.id);
-                        const botGuild = client?.guilds?.cache?.get(guildId);
-                        if (!botGuild) return null;
-                        const canManage = hasManageGuildPermissionBits(g.permissions, Boolean(g.owner));
-                        return {
-                            guildId,
-                            name: botGuild.name || g.name || `Guild ${guildId}`,
-                            iconUrl: botGuild.iconURL ? botGuild.iconURL({ extension: "png", size: 128 }) : (g.icon ? `https://cdn.discordapp.com/icons/${guildId}/${g.icon}.png?size=128` : null),
-                            canManage,
-                            href: canManage ? `/g/${encodeURIComponent(guildId)}` : `/me?guild=${encodeURIComponent(guildId)}`,
-                        };
-                    }).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
-                } catch {
-                    const manageableGuilds = await getManageableGuilds(db, client, session.discordId);
-                    guilds = manageableGuilds.map((g) => ({
-                        ...g,
-                        canManage: true,
-                        href: `/g/${encodeURIComponent(g.guildId)}`,
-                    }));
-                }
-                res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(renderGuildsHtml({ user: session, guilds }));
+                sendRedirect(res, session?.discordId ? "/me" : "/");
                 return;
             }
 

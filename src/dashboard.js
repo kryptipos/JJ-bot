@@ -135,7 +135,7 @@ function getAdminIdSet() {
 }
 
 function getDashboardLogoUrl(fallback = null) {
-    return process.env.DASHBOARD_LOGO_URL || fallback || null;
+    return fallback || process.env.DASHBOARD_LOGO_URL || null;
 }
 
 function isAdminDiscordId(discordId) {
@@ -716,10 +716,10 @@ function renderSimpleActionPage({ title, message, backHref = "/me", primaryLinkH
 </head><body><div class="wrap"><div class="card"><h1 style="margin-top:0">${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p>${primaryLinkHref ? `<p><a href="${escapeHtml(primaryLinkHref)}" target="_blank" rel="noreferrer">${escapeHtml(primaryLinkLabel || "Open Discord")}</a></p>` : ""}<p><a href="${escapeHtml(backHref)}">Back</a></p></div></div></body></html>`;
 }
 
-function renderLandingPage({ loggedIn = false } = {}) {
-    const faviconUrl = getDashboardLogoUrl();
-    const primaryHref = loggedIn ? "/me" : "/login?next=%2Fme";
-    const primaryLabel = loggedIn ? "Open Store" : "Login With Discord";
+function renderLandingPage({ loggedIn = false, logoUrl = null } = {}) {
+    const faviconUrl = getDashboardLogoUrl(logoUrl);
+    const primaryHref = "/login?next=%2Fme";
+    const primaryLabel = "Login With Discord";
     return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>JJBoost</title>${faviconUrl ? `<link rel="icon" href="${escapeHtml(faviconUrl)}"/>` : ""}
 <style>
   :root{--bg:#07090e;--line:rgba(177,196,220,.14);--text:#eef4ff;--gold:#e5b15d;--gold-deep:#b87934}
@@ -730,7 +730,8 @@ function renderLandingPage({ loggedIn = false } = {}) {
     linear-gradient(180deg,#07090e 0%,#0a0f16 40%,#090c12 100%)}
   .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
   .shell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px}
-  .logo{width:88px;height:88px;border-radius:24px;border:1px solid var(--line);display:grid;place-items:center;background:linear-gradient(180deg,#171d28,#0e131b);color:var(--gold);font-weight:800;font-size:42px;box-shadow:0 16px 40px rgba(0,0,0,.32)}
+  .logo{width:88px;height:88px;border-radius:24px;border:1px solid var(--line);display:grid;place-items:center;overflow:hidden;background:linear-gradient(180deg,#171d28,#0e131b);color:var(--gold);font-weight:800;font-size:42px;box-shadow:0 16px 40px rgba(0,0,0,.32)}
+  .logo img{width:100%;height:100%;object-fit:cover;display:block}
   .wordmark{font-size:34px;font-weight:800;letter-spacing:-.04em}
   .cta{display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;text-decoration:none;font-weight:800}
   .cta-primary{background:linear-gradient(135deg,var(--gold),var(--gold-deep));color:#171108;border:1px solid rgba(255,219,165,.32)}
@@ -738,8 +739,7 @@ function renderLandingPage({ loggedIn = false } = {}) {
   @media(max-width:640px){.logo{width:76px;height:76px;font-size:36px}.wordmark{font-size:28px}}
 </style></head><body><div class="wrap">
 <div class="shell">
-  ${loggedIn ? '<a class="toplink" href="/logout">Logout</a>' : ""}
-  <div class="logo">J</div>
+  <div class="logo">${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="JJBoost logo"/>` : "J"}</div>
   <div class="wordmark">JJBoost</div>
   <a class="cta cta-primary" href="${escapeHtml(primaryHref)}">${escapeHtml(primaryLabel)}</a>
 </div></div></body></html>`;
@@ -1016,8 +1016,15 @@ function startDashboardServer({ db, nowISO, getLatestPrice, client, port }) {
             const session = sessionId ? sessions.get(sessionId) : null;
 
             if (url.pathname === "/") {
+                if (session?.discordId) {
+                    sendRedirect(res, "/me");
+                    return;
+                }
+                const botLogoUrl = client?.user?.displayAvatarURL
+                    ? client.user.displayAvatarURL({ extension: "png", size: 256 })
+                    : null;
                 res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-                res.end(renderLandingPage({ loggedIn: Boolean(session?.discordId) }));
+                res.end(renderLandingPage({ loggedIn: false, logoUrl: botLogoUrl }));
                 return;
             }
 

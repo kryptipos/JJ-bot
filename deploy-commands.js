@@ -78,6 +78,13 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     new SlashCommandBuilder()
+        .setName("editembed")
+        .setDescription("Edit a bot embed using its Discord message link")
+        .addStringOption(o => o.setName("message_link").setDescription("Discord message link").setRequired(true))
+        .addAttachmentOption(o => o.setName("picture").setDescription("Optional replacement image").setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
+    new SlashCommandBuilder()
         .setName("mc")
         .setDescription("MemberCreate: create a member card (one-time)")
         .addUserOption(o => o.setName("user").setDescription("Buyer").setRequired(true))
@@ -115,6 +122,7 @@ const commands = [
         .addUserOption(o => o.setName("user").setDescription("Buyer").setRequired(true))
         .addStringOption(o => o.setName("details").setDescription('e.g. "Cashout / transfer out"').setRequired(true))
         .addIntegerOption(o => o.setName("gold_amount").setDescription("Gold to withdraw (1000000 = 1M)").setRequired(true))
+        .addAttachmentOption(o => o.setName("picture").setDescription("Optional proof image").setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     new SlashCommandBuilder()

@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   discord_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   details TEXT NOT NULL,
+  receipt_image_url TEXT,
   gold_cost BIGINT NOT NULL,
   balance_after BIGINT NOT NULL,
   created_at TEXT NOT NULL
@@ -113,6 +114,7 @@ CREATE TABLE IF NOT EXISTS card_profiles (
 `);
 
     await db.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS gold_price_channel_id TEXT`);
+    await db.query(`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS receipt_image_url TEXT`);
 }
 
 async function getSettings(guildId) {
@@ -185,18 +187,18 @@ async function deleteMember(guildId, discordId) {
     return res.rowCount || 0;
 }
 
-async function insertPurchase(guildId, discordId, kind, details, goldCost, balanceAfter, createdAt) {
+async function insertPurchase(guildId, discordId, kind, details, goldCost, balanceAfter, createdAt, receiptImageUrl = null) {
     await db.query(
-        `INSERT INTO purchases(guild_id, discord_id, kind, details, gold_cost, balance_after, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [guildId, discordId, kind, details, goldCost, balanceAfter, createdAt]
+        `INSERT INTO purchases(guild_id, discord_id, kind, details, receipt_image_url, gold_cost, balance_after, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [guildId, discordId, kind, details, receiptImageUrl, goldCost, balanceAfter, createdAt]
     );
 }
 
 async function getHistoryForUser(guildId, discordId, limit = 10) {
     const safeLimit = Math.max(1, Math.min(50, toInt(limit) || 10));
     const res = await db.query(
-        `SELECT kind, details, gold_cost, balance_after, created_at
+        `SELECT kind, details, receipt_image_url, gold_cost, balance_after, created_at
          FROM purchases
          WHERE guild_id = $1 AND discord_id = $2
          ORDER BY id DESC
@@ -478,6 +480,72 @@ function parsePublishFieldsRaw(fieldsRaw) {
     return { fields };
 }
 
+function parseDiscordMessageLink(input) {
+    const raw = String(input || "").trim();
+    const match = raw.match(/^https?:\/\/(?:canary\.|ptb\.)?discord\.com\/channels\/(\d+)\/(\d+)\/(\d+)$/i);
+    if (!match) return null;
+    return {
+        guildId: match[1],
+        channelId: match[2],
+        messageId: match[3],
+    };
+}
+
+function serializeFieldsForPublishModal(embedFields) {
+    const fields = Array.isArray(embedFields) ? embedFields : [];
+    if (!fields.length) return { fieldsRaw: "", messageText: "" };
+
+    const rows = [];
+    let messageText = "";
+    let index = 0;
+    let usedSectionSyntax = false;
+
+    while (index < fields.length) {
+        const current = fields[index];
+        const next = fields[index + 1];
+        if (
+            current?.name &&
+            next?.name === "Price" &&
+            current?.inline === true &&
+            next?.inline === true
+        ) {
+            usedSectionSyntax = true;
+            rows.push(`[Section] ${current.name}`);
+            const leftLines = String(current.value || "").split("\n");
+            const rightLines = String(next.value || "").split("\n");
+            const maxLen = Math.max(leftLines.length, rightLines.length);
+            for (let i = 0; i < maxLen; i += 1) {
+                const left = (leftLines[i] || "").trim();
+                const right = (rightLines[i] || "").trim();
+                if (left || right) rows.push(`${left} | ${right}`);
+            }
+            if (fields[index + 2]?.name === "\u200B") {
+                rows.push("");
+                index += 3;
+                continue;
+            }
+            index += 2;
+            if (index < fields.length) rows.push("");
+            continue;
+        }
+
+        if (current?.name === "Additional Text") {
+            messageText = String(current.value || "");
+            index += 1;
+            continue;
+        }
+
+        rows.push(`${String(current?.name || "").trim()} | ${String(current?.value || "").trim()} | ${current?.inline ? "yes" : "no"}`);
+        index += 1;
+    }
+
+    return {
+        fieldsRaw: rows.join("\n").trim(),
+        messageText: messageText.trim(),
+        usedSectionSyntax,
+    };
+}
+
 function publishTextModal() {
     const modal = new ModalBuilder()
         .setCustomId("publishtext_modal")
@@ -508,7 +576,7 @@ function publishEmbedModal() {
     return publishEmbedModalWithToken("default");
 }
 
-function publishEmbedModalWithToken(token) {
+function publishEmbedModalWithToken(token, prefill = {}) {
     const modal = new ModalBuilder()
         .setCustomId(`publishembed_modal:${token}`)
         .setTitle("Publish Embed");
@@ -519,6 +587,7 @@ function publishEmbedModalWithToken(token) {
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(256);
+    if (prefill.title) title.setValue(String(prefill.title).slice(0, 256));
 
     const description = new TextInputBuilder()
         .setCustomId("description")
@@ -526,6 +595,7 @@ function publishEmbedModalWithToken(token) {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(true)
         .setMaxLength(4000);
+    if (prefill.description) description.setValue(String(prefill.description).slice(0, 4000));
 
     const fieldsRaw = new TextInputBuilder()
         .setCustomId("fields_raw")
@@ -533,6 +603,7 @@ function publishEmbedModalWithToken(token) {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
         .setPlaceholder("[Section] Delves\nTier 1 | 30k\nTier 2 | 40k");
+    if (prefill.fieldsRaw) fieldsRaw.setValue(String(prefill.fieldsRaw).slice(0, 4000));
 
     const messageText = new TextInputBuilder()
         .setCustomId("message_text")
@@ -540,6 +611,7 @@ function publishEmbedModalWithToken(token) {
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
         .setMaxLength(2000);
+    if (prefill.messageText) messageText.setValue(String(prefill.messageText).slice(0, 2000));
 
     modal.addComponents(
         new ActionRowBuilder().addComponents(title),
@@ -1421,6 +1493,66 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 return interaction.showModal(publishEmbedModalWithToken(token));
             }
 
+            if (commandName === "editembed") {
+                if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
+                const channel = interaction.channel;
+                if (!channel || channel.type !== ChannelType.GuildText) {
+                    return interaction.reply({ content: "ERROR: This command must be used in a text channel.", ephemeral: true });
+                }
+
+                const messageLink = interaction.options.getString("message_link", true);
+                const picture = interaction.options.getAttachment("picture");
+                if (picture && (!picture.contentType || !picture.contentType.startsWith("image/"))) {
+                    return interaction.reply({ content: "ERROR: picture must be an image file.", ephemeral: true });
+                }
+
+                const parsedLink = parseDiscordMessageLink(messageLink);
+                if (!parsedLink) {
+                    return interaction.reply({ content: "ERROR: Invalid Discord message link.", ephemeral: true });
+                }
+                if (parsedLink.guildId !== interaction.guildId) {
+                    return interaction.reply({ content: "ERROR: Message link must belong to this server.", ephemeral: true });
+                }
+
+                const targetChannel = interaction.guild.channels.cache.get(parsedLink.channelId)
+                    || await interaction.guild.channels.fetch(parsedLink.channelId).catch(() => null);
+                if (!targetChannel || targetChannel.type !== ChannelType.GuildText) {
+                    return interaction.reply({ content: "ERROR: Target channel unavailable.", ephemeral: true });
+                }
+
+                const targetMessage = await targetChannel.messages.fetch(parsedLink.messageId).catch(() => null);
+                if (!targetMessage) {
+                    return interaction.reply({ content: "ERROR: Message not found.", ephemeral: true });
+                }
+                if (targetMessage.author?.id !== client.user.id) {
+                    return interaction.reply({ content: "ERROR: I can only edit embeds sent by this bot.", ephemeral: true });
+                }
+
+                const existingEmbed = targetMessage.embeds?.[0];
+                if (!existingEmbed) {
+                    return interaction.reply({ content: "ERROR: That message does not contain an embed to edit.", ephemeral: true });
+                }
+
+                const serialized = serializeFieldsForPublishModal(existingEmbed.fields || []);
+                const token = `${interaction.user.id}:${Date.now()}`;
+                pendingEmbedModalDrafts.set(token, {
+                    authorId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    channelId: parsedLink.channelId,
+                    messageId: parsedLink.messageId,
+                    mode: "edit",
+                    imageUrl: picture?.url || existingEmbed.image?.url || "",
+                    createdAt: Date.now(),
+                });
+
+                return interaction.showModal(publishEmbedModalWithToken(token, {
+                    title: existingEmbed.title || "",
+                    description: existingEmbed.description || "",
+                    fieldsRaw: serialized.fieldsRaw || "",
+                    messageText: serialized.messageText || "",
+                }));
+            }
+
             if (commandName === "mc") {
                 if (!isManager(interaction)) return interaction.reply({ content: "ERROR: No permission.", ephemeral: true });
 
@@ -1588,7 +1720,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const kind = "withdraw";
                 const details = interaction.options.getString("details", true);
                 const goldAmount = interaction.options.getInteger("gold_amount", true);
+                const picture = interaction.options.getAttachment("picture");
                 if (goldAmount <= 0) return interaction.editReply({ content: "ERROR: gold_amount must be > 0." });
+                if (picture && !String(picture.contentType || "").startsWith("image/")) {
+                    return interaction.editReply({ content: "ERROR: picture must be an image attachment." });
+                }
 
                 const guildId = interaction.guildId;
                 const member = await getMember(guildId, user.id);
@@ -1596,7 +1732,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 const newBalance = member.balance_gold - goldAmount;
                 await updateMember(guildId, newBalance, nowISO(), user.id);
-                await insertPurchase(guildId, user.id, kind, details, goldAmount, newBalance, nowISO());
+                await insertPurchase(guildId, user.id, kind, details, goldAmount, newBalance, nowISO(), picture?.url || null);
 
                 const totalBoughtGold = (await getTotalBought(guildId, user.id)).total_gold;
                 const tierName = getTierForTotalBought(totalBoughtGold).name;
@@ -1615,8 +1751,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
                         { name: "Current Reward", value: TIER_REWARDS[tierName] || TIER_REWARDS.Common, inline: false },
                         { name: "Next Tier", value: `**${progress.nextTierLabel}**`, inline: true },
                         { name: "Next Reward", value: progress.nextReward, inline: false },
-                        { name: "Note", value: "Withdrawal does not contribute to tier progress.", inline: false }
+                        { name: "Note", value: "Withdrawal does not contribute to tier progress.", inline: false },
+                        ...(picture?.url ? [{ name: "Proof Image", value: `[Open image](${picture.url})`, inline: false }] : [])
                     );
+                if (picture?.url) embed.setImage(picture.url);
 
                 return interaction.editReply({ embeds: [embed] });
             }
@@ -1630,7 +1768,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 const lines = rows.map((r, i) => {
                     const t = r.created_at.replace("T", " ").slice(0, 19);
-                    return `**${i + 1}.** [${r.kind.toUpperCase()}] ${r.details} - -${formatGold(r.gold_cost)} | bal: ${formatGold(r.balance_after)}\n\`${t}\``;
+                    const proofLine = r.receipt_image_url ? `\n[Proof image](${r.receipt_image_url})` : "";
+                    return `**${i + 1}.** [${r.kind.toUpperCase()}] ${r.details} - -${formatGold(r.gold_cost)} | bal: ${formatGold(r.balance_after)}\n\`${t}\`${proofLine}`;
                 });
 
                 return interaction.editReply({
@@ -1650,7 +1789,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 const lines = rows.map((r, i) => {
                     const t = r.created_at.replace("T", " ").slice(0, 19);
-                    return `**${i + 1}.** [${r.kind.toUpperCase()}] ${r.details} - -${formatGold(r.gold_cost)} | bal: ${formatGold(r.balance_after)}\n\`${t}\``;
+                    const proofLine = r.receipt_image_url ? `\n[Proof image](${r.receipt_image_url})` : "";
+                    return `**${i + 1}.** [${r.kind.toUpperCase()}] ${r.details} - -${formatGold(r.gold_cost)} | bal: ${formatGold(r.balance_after)}\n\`${t}\`${proofLine}`;
                 });
 
                 return interaction.editReply({
@@ -1871,6 +2011,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (guildLogoUrl) embed.setThumbnail(guildLogoUrl);
 
                 const payload = { embeds: [embed] };
+
+                if (draft.mode === "edit") {
+                    const targetMessage = await targetChannel.messages.fetch(draft.messageId).catch(() => null);
+                    if (!targetMessage) {
+                        pendingEmbedModalDrafts.delete(token);
+                        return interaction.reply({ content: "ERROR: Target message no longer exists.", ephemeral: true });
+                    }
+                    await targetMessage.edit(payload);
+                    pendingEmbedModalDrafts.delete(token);
+                    return interaction.reply({ content: `OK: Embed updated.\n${targetMessage.url}`, ephemeral: true });
+                }
 
                 const sent = await targetChannel.send(payload);
                 pendingEmbedModalDrafts.delete(token);

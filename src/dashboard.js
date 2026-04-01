@@ -493,19 +493,27 @@ function renderUserDashboardHtml(data) {
     const rows = data.purchases.map((p) => `
       <tr><td>${escapeHtml(String(p.kind || "").toUpperCase())}</td><td title="${escapeHtml(p.details)}">${escapeHtml(String(p.details || "").slice(0, 40))}</td><td>-${escapeHtml(formatGold(p.gold_cost))}</td><td>${escapeHtml(formatGold(p.balance_after))}</td><td>${formatTimestamp(p.created_at)}</td></tr>`).join("");
     const userLabel = data.username || `User ${shortDiscordId(data.discordId)}`;
+    const tierName = data.guildRole || "Common";
+    const tierPerkCopy = {
+        Common: "No tier reward yet. Keep ordering to unlock Rare tier perks.",
+        Rare: "Rare perk: 20% off one key for every 4 keys bundle.",
+        Epic: "Epic perk: 1 free key on every 8 keys bundle.",
+        Legendary: "Legendary perk: 5% discount on every gold purchase plus 1 free key on every 8 keys bundle.",
+    };
+    const tierPerkNote = tierPerkCopy[tierName] || tierPerkCopy.Common;
     const adminLink = data.isAdmin ? `<a class="ghost-link" href="/admin">Admin Dashboard</a>` : "";
     const tierColor = ({
         Legendary: "#f4c65d",
         Epic: "#d79cff",
         Rare: "#71d7ff",
         Common: "#b7c2cf",
-    })[data.guildRole || "Common"] || "#b7c2cf";
+    })[tierName] || "#b7c2cf";
     const tierTheme = ({
         Legendary: { glowA: "rgba(244,198,93,.20)", glowB: "rgba(222,122,46,.12)", surface: "#17120c" },
         Epic: { glowA: "rgba(215,156,255,.20)", glowB: "rgba(110,93,255,.12)", surface: "#13101b" },
         Rare: { glowA: "rgba(113,215,255,.18)", glowB: "rgba(50,191,165,.12)", surface: "#0f151b" },
         Common: { glowA: "rgba(183,194,207,.14)", glowB: "rgba(74,118,255,.10)", surface: "#10151b" },
-    })[data.guildRole || "Common"] || {
+    })[tierName] || {
         glowA: "rgba(183,194,207,.14)",
         glowB: "rgba(74,118,255,.10)",
         surface: "#10151b",
@@ -549,7 +557,10 @@ function renderUserDashboardHtml(data) {
   .member-card{padding:20px;border-radius:22px;border:1px solid rgba(255,255,255,.08);background:radial-gradient(420px 240px at 100% -10%, ${tierTheme.glowA}, transparent 65%),linear-gradient(180deg, ${tierTheme.surface}, #0c1016)}
   .member-head{display:flex;gap:14px;align-items:center}
   .avatar-big{width:88px;height:88px;border-radius:22px;border:2px solid ${tierColor};object-fit:cover;background:#0b0f14}
-  .tier-pill{display:inline-flex;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:rgba(255,255,255,.03);font-size:12px;font-weight:700}
+  .tier-wrap{position:relative;display:inline-flex;align-items:flex-start}
+  .tier-pill{display:inline-flex;padding:6px 10px;border-radius:999px;border:1px solid ${tierColor};color:${tierColor};background:rgba(255,255,255,.03);font-size:12px;font-weight:700;cursor:help}
+  .tier-note{position:absolute;left:0;top:calc(100% + 10px);width:min(280px,70vw);padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,#151b25,#0d1219);color:#d5deeb;font-size:12px;line-height:1.55;box-shadow:0 14px 30px rgba(0,0,0,.28);opacity:0;transform:translateY(4px);pointer-events:none;transition:opacity .14s ease,transform .14s ease;z-index:5}
+  .tier-wrap:hover .tier-note,.tier-wrap:focus-within .tier-note{opacity:1;transform:translateY(0)}
   .member-name{margin:10px 0 4px;font-size:26px}
   .member-sub{color:var(--muted);font-size:13px}
   .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
@@ -605,7 +616,10 @@ function renderUserDashboardHtml(data) {
       <div class="member-head">
         <div>${data.avatarUrl ? `<img class="avatar-big" src="${escapeHtml(data.avatarUrl)}" alt="avatar"/>` : `<div class="avatar-big"></div>`}</div>
         <div>
-          <div class="tier-pill">${escapeHtml((data.guildRole || "Member") + " Tier")}</div>
+          <div class="tier-wrap">
+            <div class="tier-pill" tabindex="0">${escapeHtml(tierName + " Tier")}</div>
+            <div class="tier-note">${escapeHtml(tierPerkNote)}</div>
+          </div>
           <div class="member-name">${escapeHtml(userLabel)}</div>
           <div class="member-sub">Private member overview for faster repeat orders.</div>
         </div>
